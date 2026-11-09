@@ -300,6 +300,25 @@ def render_clip(source, destination, start, end, layout, captions_file, brand, l
     command(args, timeout=1200)
 
 
+
+def generate_thumbnail(clip_path: Path, output_path: Path, duration_seconds: float):
+    """Make a real 9:16 JPEG cover from an exported Short.
+
+    Called lazily so jobs created before the thumbnail feature also work.
+    Never use source URLs or external image services.
+    """
+    if not clip_path.is_file():
+        raise RuntimeError("Finished clip is unavailable.")
+    position = min(15.0, max(0.6, float(duration_seconds) * 0.36))
+    command([
+        "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
+        "-ss", f"{position:.2f}", "-i", str(clip_path),
+        "-frames:v", "1", "-vf", "scale=360:640:flags=lanczos,format=yuvj420p",
+        "-q:v", "3", "-f", "image2", "-update", "1", str(output_path),
+    ], timeout=40)
+    if not output_path.is_file() or output_path.stat().st_size < 1000:
+        raise RuntimeError("Unable to extract a video thumbnail.")
+
 def make_shorts(job: dict, directory: Path, progress):
     source = Path(job["source"])
     out_dir = directory / "outputs"
