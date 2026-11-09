@@ -7,7 +7,7 @@
   <title>Shorts Factory — AI Clip Studio</title>
   <meta name="description" content="Turn long videos into captioned, branded, vertical Shorts with a private editing studio.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=2">
+  <link rel="stylesheet" href="/style.css?v=3">
 </head>
 <body>
   <div class="app-shell">
@@ -58,6 +58,56 @@
           </div>
         </div>
 
+        <section id="activePanel" class="panel progress-panel hidden" aria-live="polite">
+          <div class="progress-top"><div><div class="eyebrow">YOUR VIDEO IS IN PRODUCTION</div><h2 id="progressHeadline">Preparing your new shorts</h2><p id="progressNote">Starting...</p></div><strong class="percent" id="progressPercent">0%</strong></div>
+          <div class="progress-track"><span id="progressFill"></span></div>
+          <div class="progress-steps"><span id="step1">01 · UPLOAD</span><span id="step2">02 · FIND HIGHLIGHTS</span><span id="step3">03 · EDIT</span><span id="step4">04 · EXPORT</span></div>
+        </section>
+        <section id="results" class="results review-studio hidden">
+          <div class="results-heading">
+            <div>
+              <div class="eyebrow"><span class="ready-dot"></span> YOUR EDITING STUDIO · EXPORTS READY</div>
+              <h2>Meet your new shorts <span class="results-count" id="resultsCount">5 clips</span></h2>
+              <p>See the actual video frames, review each edit, and download only what you like.</p>
+            </div>
+            <div class="result-actions">
+              <button type="button" class="new-video-action" id="newProjectBtn">＋ New video</button>
+              <button type="button" class="download-all" id="downloadAll">↓ Download all ZIP</button>
+            </div>
+          </div>
+          <div class="project-summary">
+            <div class="project-source"><span class="project-source-icon">▣</span><div><small>YOUR ORIGINAL VIDEO</small><strong id="resultsSource">Source video</strong></div></div>
+            <div class="project-meta"><span id="resultsTotal">5 ready-to-post clips</span><span class="project-separator">•</span><span>1080 × 1920 HD</span><span class="project-separator">•</span><span>MP4 exports</span></div>
+          </div>
+          <div id="warnings"></div>
+          <div class="review-stage">
+            <div class="stage-main">
+              <div class="stage-media" id="stageMedia">
+                <img id="stageBackdrop" class="stage-backdrop" alt="" aria-hidden="true">
+                <img id="featuredPoster" class="featured-poster" alt="Selected clip video thumbnail">
+                <video id="featuredVideo" class="featured-video hidden" playsinline controls preload="none"></video>
+                <div class="stage-play-wrap" id="stagePlayWrap"><button type="button" id="stagePlay" class="stage-play" aria-label="Play selected short">▶</button><span>PLAY SELECTED CLIP</span></div>
+                <span id="stageNumber" class="stage-index">CLIP 01</span>
+                <span id="stageDuration" class="stage-duration">0:45</span>
+                <div id="stageLoading" class="stage-loading hidden"><span class="stage-spinner"></span> Loading your clip...</div>
+              </div>
+              <div class="stage-meta">
+                <div><div class="stage-meta-kicker">NOW PREVIEWING <span id="stagePosition">01 / 05</span></div><h3 id="stageClipTitle">Choose a clip to preview</h3><p id="stageClipDetails">Review the clip before sharing.</p></div>
+                <div class="stage-meta-actions"><button type="button" class="subtle-btn" id="stageCopy">⧉ Copy caption</button><button type="button" class="primary-small-btn" id="stageDownload">↓ Download MP4</button></div>
+              </div>
+            </div>
+            <aside class="stage-side">
+              <div class="stage-side-heading"><span>YOUR CLIP PLAYLIST</span><small id="stageQueueCount">0 clips</small></div>
+              <div id="clipQueue" class="clip-queue"></div>
+              <div class="stage-side-footer"><span>✧</span> Each thumbnail is a real frame from its exported video, not a placeholder.</div>
+            </aside>
+          </div>
+          <div class="gallery-heading"><div><h3>All clips</h3><p>Choose a thumbnail to watch the actual edit.</p></div><span class="gallery-hint">9:16 · FULL HD</span></div>
+          <div class="clips-grid" id="clipsGrid"></div>
+          <div class="monetize-note"><strong>Publishing and monetization</strong><p>Captions, cropping and watermarks do not establish copyright permission. Confirm source, music and visual rights and review each platform's eligibility rules before sharing.</p></div>
+        </section>
+
+        <div class="editor-heading"><div><span class="eyebrow">CREATE MORE CONTENT</span><h2>Start another batch</h2></div><span>Upload → customize → generate</span></div>
         <form id="createForm" class="form-grid">
           <section class="panel upload-panel">
             <div class="section-top"><div><span class="section-number step-circle">1</span><div><h2>Add your video</h2><p class="section-description">Start with a file from your device</p></div></div><span class="soft-tag">SOURCE</span></div>
@@ -114,16 +164,6 @@
           </section>
         </form>
 
-        <section id="activePanel" class="panel progress-panel hidden" aria-live="polite">
-          <div class="progress-top"><div><div class="eyebrow">YOUR CLIPS ARE IN PRODUCTION</div><h2 id="progressHeadline">Processing your video</h2><p id="progressNote">Starting...</p></div><strong class="percent" id="progressPercent">0%</strong></div>
-          <div class="progress-track"><span id="progressFill"></span></div>
-          <div class="progress-steps"><span id="step1">01 · UPLOAD</span><span id="step2">02 · ANALYZE</span><span id="step3">03 · RENDER</span><span id="step4">04 · EXPORT</span></div>
-        </section>
-        <section id="results" class="results hidden">
-          <div class="results-heading"><div><div class="eyebrow">READY TO REVIEW</div><h2>Your finished shorts</h2><p>Watch each clip before posting. Highlight scores are editing estimates, not view predictions.</p></div><button type="button" class="download-all" id="downloadAll">↓ Download all · ZIP</button></div>
-          <div id="warnings"></div><div class="clips-grid" id="clipsGrid"></div>
-          <div class="monetize-note"><strong>Before you publish or monetize</strong><p>Confirm rights to the source footage, music and visuals. Every platform separately decides monetization eligibility—even when a clip has captions and a logo.</p></div>
-        </section>
         <section class="history"><div class="history-heading"><div><span class="eyebrow">YOUR WORK</span><h2>Recent projects</h2></div><button type="button" id="refreshBtn">↻ Refresh</button></div><div id="historyList" class="history-list"><div class="empty-history">Your first video will appear here.</div></div></section>
       </div>
 
@@ -133,6 +173,6 @@
   </div>
   <div class="modal-backdrop hidden" id="authModal"><form class="auth-modal" id="authForm"><div class="auth-icon">▶</div><h2>Welcome to your studio</h2><p>Enter the private password configured for your Shorts Factory server.</p><label for="accessPassword">Access password</label><input type="password" id="accessPassword" autocomplete="current-password" placeholder="Your studio password" required><button type="submit" class="generate-button">Unlock studio <span>↗</span></button><span class="auth-error" id="authError"></span></form></div>
   <div class="toast hidden" id="toast" role="status"></div>
-  <script src="/app.js?v=2" defer></script>
+  <script src="/app.js?v=3" defer></script>
 </body>
 </html>
