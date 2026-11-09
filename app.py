@@ -71,11 +71,34 @@ def public_job(job: dict) -> dict:
     return {key: value for key, value in job.items() if key not in ("source", "logo")}
 
 
+def iter_job_folders(newest_first: bool = False) -> list[Path]:
+    """Read only our own 20-character hex job folders.
+
+    Railway persistent disks can contain system-owned folders such as
+    lost+found, which are not readable by the unprivileged app process.
+    Never probe inside them or let one unreadable folder break the API.
+    """
+    discovered = []
+    for folder in BASE.iterdir():
+        name = folder.name
+        if len(name) != 20 or any(c not in "0123456789abcdef" for c in name):
+            continue
+        try:
+            if folder.is_symlink() or not folder.is_dir():
+                continue
+            record = folder / "job.json"
+            if not record.is_file():
+                continue
+            discovered.append((folder.stat().st_mtime, folder))
+        except OSError:
+            continue
+    discovered.sort(key=lambda entry: entry[0], reverse=newest_first)
+    return [folder for _, folder in discovered]
+
+
 def cleanup_old_jobs():
     age_limit = int(os.getenv("JOB_TTL_HOURS", "48")) * 3600
-    for folder in BASE.iterdir():
-        if not folder.is_dir() or not (folder / "job.json").exists():
-            continue
+    for folder in iter_job_folders():
         try:
             job = json.loads((folder / "job.json").read_text(encoding="utf-8"))
             if job.get("status") in ("queued", "analyzing", "rendering"):
@@ -118,9 +141,7 @@ def config():
 def list_jobs(x_access_key: str | None = Header(default=None)):
     protect(x_access_key)
     jobs = []
-    for folder in sorted(BASE.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-        if not folder.is_dir() or not (folder / "job.json").exists():
-            continue
+    for folder in iter_job_folders(newest_first=True):
         try:
             job = json.loads((folder / "job.json").read_text(encoding="utf-8"))
             if job.get("status") in ("queued", "analyzing", "rendering") and job.get("updated_at", 0) < time.time() - 7200:
