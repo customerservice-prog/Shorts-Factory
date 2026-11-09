@@ -263,6 +263,8 @@
       const job = await response.json();
       activeJobId = job.id;
       selectedJobId = job.id;
+      pendingCompletionId = job.id;
+      renderedResultsKey = "";
       toast("Video uploaded. Your processing job has started.");
       await refreshJobs();
       $("activePanel").scrollIntoView({ behavior: "smooth", block: "center" });
@@ -370,6 +372,7 @@
     if (renderedResultsKey === fingerprint && !$("results").classList.contains("hidden")) return;
     renderedResultsKey = fingerprint;
     $("results").classList.remove("hidden");
+    $("editorHeadline").textContent = "Create your next batch";
     $("resultsCount").textContent = (job.clips || []).length + " clips";
     $("stageQueueCount").textContent = (job.clips || []).length + " clips";
     $("resultsSource").textContent = job.filename;
@@ -505,8 +508,18 @@
     if (!confirm("Permanently delete this job and its exported videos?")) return;
     try {
       await api("/api/jobs/" + encodeURIComponent(jobId), { method: "DELETE" });
-      if (selectedJobId === jobId) { selectedJobId = null; $("results").classList.add("hidden"); }
+      if (selectedJobId === jobId) {
+        clearVideoPreview();
+        selectedJobId = null;
+        renderedResultsKey = "";
+        $("results").classList.add("hidden");
+        $("editorHeadline").textContent = "Create your first batch";
+      }
       if (activeJobId === jobId) { activeJobId = null; $("activePanel").classList.add("hidden"); }
+      for (const [key, url] of thumbs) {
+        if (key.startsWith(jobId + "/")) { URL.revokeObjectURL(url); thumbs.delete(key); }
+      }
+      renderedHistoryKey = "";
       await refreshJobs();
       toast("Job deleted.");
     } catch (error) { toast(error.message); }
@@ -514,6 +527,12 @@
 
   function setupActions() {
     document.addEventListener("click", async (event) => {
+      const selectedButton = event.target.closest("[data-select]");
+      if (selectedButton) {
+        selectClip(Number(selectedButton.dataset.select), true);
+        $("results").scrollIntoView({behavior:"smooth",block:"start"});
+        return;
+      }
       const view = event.target.closest("[data-view]");
       const del = event.target.closest("[data-delete]");
       const down = event.target.closest("[data-download]");
@@ -539,6 +558,29 @@
       const job = jobs.find((j) => j.id === selectedJobId);
       if (job && job.zip_file) download(job.id, job.zip_file);
     });
+    $("stagePlay").addEventListener("click", playSelectedClip);
+    $("stageDownload").addEventListener("click", () => {
+      const job = jobs.find(j => j.id === selectedJobId);
+      const clip = job?.clips?.[selectedClipIndex];
+      if (clip) download(job.id, clip.file);
+    });
+    $("stageCopy").addEventListener("click", async () => {
+      const job = jobs.find(j => j.id === selectedJobId);
+      const clip = job?.clips?.[selectedClipIndex];
+      if (!clip) return;
+      const caption = clip.title + "\n\n#Shorts";
+      try {
+        await navigator.clipboard.writeText(caption);
+        toast("Caption copied. Review and personalize it before posting.");
+      } catch (_) {
+        const promptText = window.prompt("Copy this caption:", caption);
+        if (promptText !== null) toast("Caption available to copy.");
+      }
+    });
+    $("newProjectBtn").addEventListener("click", () => {
+      $("createForm").scrollIntoView({behavior:"smooth",block:"start"});
+      $("videoFile").focus({preventScroll:true});
+    });
     $("refreshBtn").addEventListener("click", () => refreshJobs().catch((e) => toast(e.message)));
     $("navCreate").addEventListener("click", () => showPage("create"));
     $("navLibrary").addEventListener("click", () => showPage("library"));
@@ -557,14 +599,14 @@
     });
   }
 
-  function showPage(page) {
+  function showPage(page, shouldScroll = true) {
     const createPage = page === "create";
     $("pageCreate").classList.toggle("hidden", !createPage);
     $("pageLibrary").classList.toggle("hidden", createPage);
     $("navCreate").classList.toggle("active", createPage);
     $("navLibrary").classList.toggle("active", !createPage);
     $("pageCrumb").textContent = createPage ? "NEW PROJECT" : "MY EXPORTS";
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    if (shouldScroll) window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function init() {
