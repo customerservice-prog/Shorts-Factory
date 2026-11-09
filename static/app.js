@@ -9,6 +9,7 @@
   let layout = "blur";
   let currentPreview = null;
   let toastTimer = null;
+  let sourcePreviewUrl = null;
 
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -37,19 +38,65 @@
     return response;
   }
 
+  const presets = {
+    quick: { count: 6, length: "20", captions: "pop" },
+    balanced: { count: 5, length: "45", captions: "pop" },
+    story: { count: 3, length: "60", captions: "classic" }
+  };
+
+  function updateSummary() {
+    const count = Number($("clipCount").value);
+    const length = Number($("clipLength").value);
+    $("clipCountText").textContent = count + (count === 1 ? " clip" : " clips");
+    $("outputSummary").textContent = count + " vertical " + (count === 1 ? "clip" : "clips") + " · ~" + length + "s each";
+    const matched = Object.entries(presets).find(([, p]) => p.count === count &&
+      Number(p.length) === length && p.captions === $("captions").value);
+    document.querySelectorAll("[data-preset]").forEach((button) => {
+      const selected = !!matched && button.dataset.preset === matched[0];
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-pressed", String(selected));
+    });
+  }
+
   function setFile(file) {
     if (!file) return;
     const allowed = /\.(mp4|mov|mkv|webm|m4v)$/i.test(file.name);
-    if (!allowed) return toast("Choose a supported video file (MP4, MOV, MKV, WEBM, M4V).");
+    if (!allowed) {
+      $("videoFile").value = "";
+      return toast("Choose MP4, MOV, MKV, WEBM or M4V video.");
+    }
+    if (!file.size) {
+      $("videoFile").value = "";
+      return toast("That file is empty. Choose a different video.");
+    }
     if (config && file.size > config.max_upload_mb * 1024 * 1024) {
-      return toast("That video exceeds the " + config.max_upload_mb + " MB limit.");
+      $("videoFile").value = "";
+      return toast("That video is over the " + config.max_upload_mb + " MB limit.");
     }
     const dt = new DataTransfer();
     dt.items.add(file);
     $("videoFile").files = dt.files;
-    $("dropHeadline").textContent = file.name;
-    $("dropSubhead").textContent = (file.size / 1048576).toFixed(1) + " MB · Ready to create shorts";
-    $("dropzone").classList.add("dragging");
+    if (sourcePreviewUrl) URL.revokeObjectURL(sourcePreviewUrl);
+    sourcePreviewUrl = URL.createObjectURL(file);
+    const preview = $("sourcePreview");
+    preview.pause();
+    preview.src = sourcePreviewUrl;
+    preview.onloadedmetadata = () => {
+      if (!Number.isFinite(preview.duration)) return;
+      const seconds = Math.round(preview.duration);
+      const duration = Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
+      $("sourceMeta").textContent = duration + " min:sec · " + (file.size / 1048576).toFixed(1) + " MB";
+    };
+    preview.onerror = () => {
+      $("sourceMeta").textContent = (file.size / 1048576).toFixed(1) + " MB · Preview unavailable (file may still process)";
+    };
+    $("sourceName").textContent = file.name;
+    $("sourceMeta").textContent = (file.size / 1048576).toFixed(1) + " MB · Checking preview…";
+    $("sourceCard").classList.remove("hidden");
+    $("dropzone").classList.add("hidden");
+    $("generateBtn").disabled = false;
+    $("generateText").textContent = "Generate my shorts";
+    updateSummary();
   }
 
   function setupUploads() {
@@ -59,6 +106,19 @@
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("videoFile").click(); }
     });
     $("videoFile").addEventListener("change", (e) => setFile(e.target.files[0]));
+    $("replaceBtn").addEventListener("click", () => $("videoFile").click());
+    document.querySelectorAll("[data-preset]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const recipe = presets[button.dataset.preset];
+        if (!recipe) return;
+        $("clipCount").value = String(recipe.count);
+        $("clipLength").value = recipe.length;
+        $("captions").value = recipe.captions;
+        updateSummary();
+      });
+    });
+    $("clipLength").addEventListener("change", updateSummary);
+    $("captions").addEventListener("change", updateSummary);
     for (const eventName of ["dragenter", "dragover"]) {
       $("dropzone").addEventListener(eventName, (e) => {
         e.preventDefault(); e.stopPropagation(); $("dropzone").classList.add("dragging");
@@ -86,9 +146,8 @@
       image.onload = () => URL.revokeObjectURL(image.src);
       $("logoSymbol").replaceChildren(image);
     });
-    $("clipCount").addEventListener("input", (e) => {
-      $("clipCountText").textContent = e.target.value + (e.target.value === "1" ? " clip" : " clips");
-    });
+    $("clipCount").addEventListener("input", updateSummary);
+    updateSummary();
     document.querySelectorAll("[data-layout]").forEach((button) => {
       button.addEventListener("click", () => {
         layout = button.dataset.layout;
@@ -134,7 +193,7 @@
       $("activePanel").classList.add("hidden");
       toast(error.message);
     } finally {
-      button.disabled = false;
+      button.disabled = !$("videoFile").files.length;
       button.innerHTML = old;
     }
   }
@@ -179,8 +238,8 @@
     $("historyList").innerHTML = html;
     $("libraryList").innerHTML = html;
     const complete = jobs.filter((j) => j.status === "completed");
-    $("statsVideos").textContent = complete.length;
-    $("statsClips").textContent = complete.reduce((sum, j) => sum + (j.clips || []).length, 0);
+    if ($("statsVideos")) $("statsVideos").textContent = complete.length;
+    if ($("statsClips")) $("statsClips").textContent = complete.reduce((sum, j) => sum + (j.clips || []).length, 0);
     $("navCount").textContent = jobs.length;
   }
 
@@ -343,7 +402,7 @@
     $("pageLibrary").classList.toggle("hidden", createPage);
     $("navCreate").classList.toggle("active", createPage);
     $("navLibrary").classList.toggle("active", !createPage);
-    $("pageCrumb").textContent = createPage ? "CREATE" : "MY EXPORTS";
+    $("pageCrumb").textContent = createPage ? "NEW PROJECT" : "MY EXPORTS";
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -354,7 +413,7 @@
       const response = await fetch("/api/config", { cache: "no-store" });
       if (!response.ok) throw new Error("Cannot connect to the processing server.");
       config = await response.json();
-      $("uploadLimit").textContent = "Maximum file size: " + config.max_upload_mb + " MB";
+      $("uploadLimit").textContent = "MP4, MOV, WEBM, MKV, M4V · Up to " + config.max_upload_mb + " MB";
       if (config.needs_setup) {
         $("authModal").classList.remove("hidden");
         $("authError").textContent = "Server setup required: set APP_PASSWORD in the host's environment variables.";
