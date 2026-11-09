@@ -9,6 +9,68 @@
   let layout = "blur";
   let currentPreview = null;
   let toastTimer = null;
+
+  let renderedResultsKey = "";
+  let renderedHistoryKey = "";
+  let selectedClipIndex = 0;
+  let previewVideoUrl = null;
+  let previewRequestNumber = 0;
+  let pendingCompletionId = null;
+  const thumbs = new Map();
+  const pendingThumbs = new Map();
+  const pad = (number) => String(number).padStart(2, "0");
+  function clock(seconds) {
+    const total = Math.max(0, Math.floor(Number(seconds) || 0));
+    const minutes = Math.floor(total / 60);
+    return (minutes >= 60 ? Math.floor(minutes / 60) + ":" + pad(minutes % 60) : minutes) + ":" + pad(total % 60);
+  }
+  function thumbnailKey(jobId, file) { return jobId + "/" + file; }
+
+  async function thumbnailUrl(jobId, filename) {
+    const key = thumbnailKey(jobId, filename);
+    if (thumbs.has(key)) return thumbs.get(key);
+    if (pendingThumbs.has(key)) return pendingThumbs.get(key);
+    const work = (async () => {
+      const response = await api("/api/jobs/" + encodeURIComponent(jobId) +
+        "/thumbnails/" + encodeURIComponent(filename));
+      const blob = await response.blob();
+      if (!blob.type.includes("image/") || !blob.size) throw new Error("Thumbnail is unavailable");
+      const url = URL.createObjectURL(blob);
+      thumbs.set(key, url);
+      return url;
+    })();
+    pendingThumbs.set(key, work);
+    try { return await work; }
+    finally { pendingThumbs.delete(key); }
+  }
+
+  function applyThumbnail(image) {
+    const jobId = image.dataset.thumbJob;
+    const file = image.dataset.clipThumb;
+    if (!jobId || !file) return;
+    thumbnailUrl(jobId, file).then((url) => {
+      if (image.isConnected && image.dataset.thumbJob === jobId && image.dataset.clipThumb === file) {
+        image.src = url;
+        image.classList.add("thumb-loaded");
+      }
+    }).catch(() => { if (image.isConnected) image.classList.add("thumb-unavailable"); });
+  }
+  function hydrateThumbnails(root) {
+    root.querySelectorAll("img[data-clip-thumb]").forEach(applyThumbnail);
+  }
+  function clearVideoPreview() {
+    previewRequestNumber++;
+    const video = $("featuredVideo");
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+    video.classList.add("hidden");
+    if (previewVideoUrl) URL.revokeObjectURL(previewVideoUrl);
+    previewVideoUrl = null;
+    $("stageLoading").classList.add("hidden");
+    $("stagePlayWrap").classList.remove("hidden");
+  }
+
   let sourcePreviewUrl = null;
 
   const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -215,19 +277,20 @@
 
   function statusLabel(status) {
     return ({
-      queued: "Queued", analyzing: "Analyzing", rendering: "Rendering",
-      completed: "Complete", failed: "Failed", interrupted: "Interrupted"
+      queued: "Queued", analyzing: "Finding highlights", rendering: "Editing shorts",
+      completed: "Ready", failed: "Failed", interrupted: "Interrupted"
     })[status] || "Unknown";
   }
 
   function renderProgress(job) {
-    if (!job) {
-      $("activePanel").classList.add("hidden");
+    const panel = $("activePanel");
+    if (!job || job.status === "completed") {
+      panel.classList.add("hidden");
       return;
     }
-    $("activePanel").classList.remove("hidden");
-    const done = job.status === "completed";
-    $("progressHeadline").textContent = done ? "All shorts are ready" : job.status === "failed" ? "Processing failed" : "Making your shorts";
+    panel.classList.remove("hidden");
+    $("progressHeadline").textContent = job.status === "failed" ? "Processing needs attention" :
+      job.status === "interrupted" ? "Processing was interrupted" : "Creating your shorts";
     $("progressNote").textContent = job.note || "Processing...";
     $("progressPercent").textContent = (job.progress || 0) + "%";
     $("progressFill").style.width = (job.progress || 0) + "%";
@@ -239,21 +302,62 @@
   function historyMarkup(job) {
     const date = new Date((job.created_at || 0) * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
     const canDelete = !["queued", "analyzing", "rendering"].includes(job.status);
-    return '<article class="history-item"><span class="history-file-icon">▶</span>' +
+    const first = (job.clips || [])[0];
+    const poster = first ? '<img class="history-poster" data-thumb-job="' + esc(job.id) +
+      '" data-clip-thumb="' + esc(first.file) + '" alt="Video thumbnail" loading="lazy">' : '<span>▶</span>';
+    return '<article class="history-item"><span class="history-file-icon">' + poster + '</span>' +
       '<div class="history-details"><strong title="' + esc(job.filename) + '">' + esc(job.filename) + '</strong>' +
-      '<p>' + esc(date) + ' · ' + esc(job.clip_count) + ' requested · ' + esc(job.clip_length) + ' sec</p></div>' +
+      '<p>' + esc(date) + ' · ' + esc((job.clips || []).length || job.clip_count) +
+      ' clips · ' + esc(job.clip_length) + 's target</p></div>' +
       '<span class="status-tag ' + esc(job.status) + '">' + esc(statusLabel(job.status)) + '</span>' +
-      '<button type="button" data-view="' + esc(job.id) + '">' + (job.status === "completed" ? "View clips" : "Details") + '</button>' +
-      (canDelete ? '<button type="button" class="delete-btn" data-delete="' + esc(job.id) + '" aria-label="Delete job">×</button>' : "") +
+      '<button type="button" data-view="' + esc(job.id) + '">' + (job.status === "completed" ? "Open studio ↗" : "View status") + '</button>' +
+      (canDelete ? '<button type="button" class="delete-btn" data-delete="' + esc(job.id) + '" aria-label="Delete project">×</button>' : "") +
       '</article>';
   }
 
   function renderHistory() {
-    const html = jobs.length ? jobs.map(historyMarkup).join("") : '<div class="empty-history">Your first video will appear here.</div>';
+    const fingerprint = jobs.map((j) => j.id + "/" + j.status + "/" + j.updated_at).join("|");
+    if (fingerprint === renderedHistoryKey) return;
+    renderedHistoryKey = fingerprint;
+    const html = jobs.length ? jobs.map(historyMarkup).join("") :
+      '<div class="empty-history"><span>▦</span><strong>No projects yet</strong><p>Upload a video above and your edited shorts will appear here.</p></div>';
     $("historyList").innerHTML = html;
     $("libraryList").innerHTML = html;
-    const complete = jobs.filter((j) => j.status === "completed");
     $("navCount").textContent = jobs.length;
+    hydrateThumbnails($("historyList"));
+    hydrateThumbnails($("libraryList"));
+  }
+
+  function buildClipCard(job, clip, index) {
+    const duration = clock(clip.length);
+    const startTime = clock(clip.start);
+    const count = pad(index + 1);
+    const captions = clip.captions ? "Captioned" : "No captions";
+    return '<article class="clip-card" data-card="' + index + '">' +
+      '<button type="button" class="clip-cover" data-select="' + index + '" aria-label="Preview short ' + count + '">' +
+      '<span class="cover-placeholder">▣</span><img data-thumb-job="' + esc(job.id) + '" data-clip-thumb="' + esc(clip.file) +
+      '" alt="Actual video frame of short ' + count + '" loading="lazy">' +
+      '<span class="clip-cover-top">SHORT ' + count + '</span>' +
+      '<span class="clip-cover-play">▶</span>' +
+      '<span class="clip-cover-length">' + duration + '</span>' +
+      '</button><div class="clip-info">' +
+      '<div class="clip-number">HIGHLIGHT ' + count +
+      (index === 0 ? '<span class="top-pick">✦ TOP PICK</span>' : "") + '</div>' +
+      '<h3 title="' + esc(clip.title) + '">' + esc(clip.title) + '</h3>' +
+      '<div class="clip-stats"><span>◷ ' + startTime + ' in source</span><span>▣ ' + captions + '</span></div>' +
+      '<div class="clip-buttons"><button type="button" data-preview="' + esc(clip.file) + '">▶ Watch clip</button>' +
+      '<button class="download" type="button" data-download="' + esc(clip.file) + '">↓ MP4</button></div></div></article>';
+  }
+
+  function buildQueueItem(job, clip, index) {
+    return '<button type="button" class="queue-item" data-select="' + index +
+      '" aria-label="Select short ' + pad(index + 1) + '">' +
+      '<span class="queue-poster"><img data-thumb-job="' + esc(job.id) +
+      '" data-clip-thumb="' + esc(clip.file) + '" alt="" loading="lazy"><span>▶</span></span>' +
+      '<span class="queue-text"><small>SHORT ' + pad(index + 1) + ' · ' + clock(clip.length) + '</small>' +
+      '<strong>' + esc(clip.title) + '</strong><em>From ' + clock(clip.start) + ' · ' +
+      (clip.captions ? "Captions on" : "No captions") + '</em></span>' +
+      '<span class="queue-arrow">↗</span></button>';
   }
 
   function renderResults(job) {
@@ -261,19 +365,80 @@
       $("results").classList.add("hidden");
       return;
     }
+    const fingerprint = job.id + "/" + (job.clips || []).map(c => c.file).join("|");
     selectedJobId = job.id;
+    if (renderedResultsKey === fingerprint && !$("results").classList.contains("hidden")) return;
+    renderedResultsKey = fingerprint;
     $("results").classList.remove("hidden");
-    $("warnings").innerHTML = (job.warnings || []).map((w) => '<div class="warning">' + esc(w) + '</div>').join("");
-    const clips = job.clips || [];
-    $("clipsGrid").innerHTML = clips.map((clip, index) => (
-      '<article class="clip-card"><div class="clip-thumb"><span>▶</span><small>9 : 16 VERTICAL</small></div>' +
-      '<div class="clip-info"><div class="clip-number">SHORT ' + String(index + 1).padStart(2, "0") + '</div>' +
-      '<h3 title="' + esc(clip.title) + '">' + esc(clip.title) + '</h3>' +
-      '<div class="clip-meta"><span>' + esc(clip.length) + ' sec · ' + (clip.captions ? "Captioned" : "No captions") +
-      '</span><span class="score">' + esc(clip.highlight_score) + '/100 score</span></div>' +
-      '<div class="clip-buttons"><button type="button" data-preview="' + esc(clip.file) + '">▶ Preview</button>' +
-      '<button class="download" type="button" data-download="' + esc(clip.file) + '">↓ Export</button></div></div></article>'
-    )).join("");
+    $("resultsCount").textContent = (job.clips || []).length + " clips";
+    $("stageQueueCount").textContent = (job.clips || []).length + " clips";
+    $("resultsSource").textContent = job.filename;
+    $("resultsTotal").textContent = (job.clips || []).length + " finished edits";
+    $("warnings").innerHTML = (job.warnings || []).map(w => '<div class="warning">' + esc(w) + '</div>').join("");
+    $("clipsGrid").innerHTML = (job.clips || []).map((clip,i) => buildClipCard(job,clip,i)).join("");
+    $("clipQueue").innerHTML = (job.clips || []).map((clip,i) => buildQueueItem(job,clip,i)).join("");
+    hydrateThumbnails($("clipsGrid"));
+    hydrateThumbnails($("clipQueue"));
+    selectClip(0, false);
+    $("activePanel").classList.add("hidden");
+  }
+
+  function selectClip(index, playNow = false) {
+    const job = jobs.find(j => j.id === selectedJobId);
+    if (!job || !job.clips || !job.clips[index]) return;
+    clearVideoPreview();
+    selectedClipIndex = index;
+    const clip = job.clips[index];
+    const total = job.clips.length;
+    $("stageNumber").textContent = "CLIP " + pad(index + 1);
+    $("stageDuration").textContent = clock(clip.length);
+    $("stagePosition").textContent = pad(index + 1) + " / " + pad(total);
+    $("stageClipTitle").textContent = clip.title;
+    $("stageClipDetails").textContent = clock(clip.length) + " · from " + clock(clip.start) +
+      " in your original video · " + (clip.captions ? "Captions included" : "No captions");
+    $("featuredPoster").removeAttribute("src");
+    $("stageBackdrop").removeAttribute("src");
+    const currentJob = selectedJobId;
+    thumbnailUrl(job.id, clip.file).then(url => {
+      if (currentJob !== selectedJobId || selectedClipIndex !== index) return;
+      $("featuredPoster").src = url;
+      $("stageBackdrop").src = url;
+    }).catch(() => {});
+    document.querySelectorAll("[data-select]").forEach(button => {
+      const selected = Number(button.dataset.select) === index;
+      button.classList.toggle("selected", selected);
+      button.setAttribute("aria-pressed", selected ? "true" : "false");
+    });
+    document.querySelectorAll("[data-card]").forEach(card => {
+      card.classList.toggle("selected", Number(card.dataset.card) === index);
+    });
+    if (playNow) playSelectedClip();
+  }
+
+  async function playSelectedClip() {
+    const job = jobs.find(j => j.id === selectedJobId);
+    const clip = job?.clips?.[selectedClipIndex];
+    if (!job || !clip) return;
+    clearVideoPreview();
+    const requestId = ++previewRequestNumber;
+    $("stageLoading").classList.remove("hidden");
+    $("stagePlayWrap").classList.add("hidden");
+    try {
+      const blob = await fileBlob(job.id, clip.file);
+      if (requestId !== previewRequestNumber) return;
+      previewVideoUrl = URL.createObjectURL(blob);
+      const player = $("featuredVideo");
+      player.src = previewVideoUrl;
+      player.classList.remove("hidden");
+      $("stageLoading").classList.add("hidden");
+      player.play().catch(() => { /* Browser may require tapping play. */ });
+    } catch (error) {
+      if (requestId === previewRequestNumber) {
+        $("stageLoading").classList.add("hidden");
+        $("stagePlayWrap").classList.remove("hidden");
+        toast("Unable to preview this clip: " + error.message);
+      }
+    }
   }
 
   async function refreshJobs() {
@@ -282,18 +447,23 @@
       jobs = (await response.json()).jobs || [];
       $("systemState").textContent = "Engine ready";
       renderHistory();
-      const working = jobs.find((j) => ["queued", "analyzing", "rendering"].includes(j.status));
+      const working = jobs.find(j => ["queued", "analyzing", "rendering"].includes(j.status));
       if (working) activeJobId = working.id;
-      if (activeJobId) renderProgress(jobs.find((j) => j.id === activeJobId));
-      const selected = jobs.find((j) => j.id === selectedJobId);
-      if (selected && selected.status === "completed") renderResults(selected);
-      else if (!selectedJobId) {
-        const latest = jobs.find((j) => j.status === "completed");
+      if (activeJobId) renderProgress(jobs.find(j => j.id === activeJobId));
+      const selected = jobs.find(j => j.id === selectedJobId);
+      if (selected?.status === "completed") renderResults(selected);
+      else if (!selectedJobId || !selected) {
+        const latest = jobs.find(j => j.status === "completed");
         if (latest) renderResults(latest);
+      }
+      if (pendingCompletionId && jobs.some(j => j.id === pendingCompletionId && j.status === "completed")) {
+        pendingCompletionId = null;
+        toast("Your shorts are ready! Pick a thumbnail to review.");
+        setTimeout(() => $("results").scrollIntoView({ behavior: "smooth", block: "start" }), 80);
       }
     } catch (error) {
       $("systemState").textContent = "Connection issue";
-      if (error.message.includes("401")) {
+      if (error.message.includes("Incorrect access password") || error.message.includes("401")) {
         $("authModal").classList.remove("hidden");
       }
       throw error;
@@ -321,36 +491,14 @@
   }
 
   async function preview(jobId, file) {
-    try {
-      toast("Loading video preview...");
-      const blob = await fileBlob(jobId, file);
-      const url = URL.createObjectURL(blob);
-      if (currentPreview) currentPreview();
-      const backdrop = document.createElement("div");
-      backdrop.className = "modal-backdrop";
-      backdrop.style.zIndex = "60";
-      const frame = document.createElement("div");
-      frame.style.cssText = "position:relative;display:flex;flex-direction:column;align-items:center;gap:10px;width:min(400px,96vw);background:#111620;padding:17px;border:1px solid #344037;border-radius:15px";
-      const close = document.createElement("button");
-      close.textContent = "✕ Close preview";
-      close.style.cssText = "align-self:flex-end;border:1px solid #47525f;border-radius:8px;background:#252e3b;color:white;padding:8px 12px";
-      const video = document.createElement("video");
-      video.controls = true;
-      video.autoplay = true;
-      video.playsInline = true;
-      video.src = url;
-      video.style.cssText = "width:auto;max-width:100%;height:min(70vh,650px);aspect-ratio:9/16;background:black;border-radius:10px";
-      function finish() {
-        video.pause(); video.removeAttribute("src"); video.load();
-        backdrop.remove(); URL.revokeObjectURL(url); currentPreview = null;
-      }
-      currentPreview = finish;
-      close.addEventListener("click", finish);
-      backdrop.addEventListener("click", (e) => { if (e.target === backdrop) finish(); });
-      frame.append(close, video);
-      backdrop.appendChild(frame);
-      document.body.appendChild(backdrop);
-    } catch (error) { toast("Preview error: " + error.message); }
+    const job = jobs.find(j => j.id === jobId);
+    if (!job) return;
+    const index = (job.clips || []).findIndex(c => c.file === file);
+    if (index < 0) return;
+    if (selectedJobId !== jobId) renderResults(job);
+    selectClip(index, true);
+    showPage("create", false);
+    $("results").scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   async function remove(jobId) {
