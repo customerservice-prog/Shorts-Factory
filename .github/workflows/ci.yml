@@ -1,0 +1,21 @@
+name: Shorts Factory CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Python syntax and logic tests
+        run: |
+          python -m py_compile app.py pipeline.py
+          python -m unittest discover -s tests -v
+      - name: Browser JavaScript syntax
+        run: node --check static/app.js
+      - name: Check Dockerfile build
+        run: docker build -t shorts-factory-test .

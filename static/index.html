@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#090b12">
+  <title>Shorts Factory — Turn long videos into moments</title>
+  <meta name="description" content="A private AI-powered clipping and captions studio. Turn long videos into branded vertical shorts.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Shorts Factory home">
+        <span class="brand-icon"><span class="brand-play">▶</span></span>
+        <span class="brand-words">SHORTS<span>FACTORY</span><small>CREATOR STUDIO</small></span>
+      </a>
+      <div class="nav-section-label">WORKSPACE</div>
+      <nav class="nav-links" aria-label="Main navigation">
+        <button class="nav-link active" type="button" id="navCreate"><span class="nav-emoji">✦</span> Create shorts</button>
+        <button class="nav-link" type="button" id="navLibrary"><span class="nav-emoji">▦</span> My exports <span id="navCount">0</span></button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="engine-chip"><span class="green-dot"></span><span>LOCAL PROCESSING ENGINE</span></div>
+        <div class="sidebar-help"><strong>No paid AI API needed.</strong><p>Your videos are processed by Whisper and FFmpeg on your server.</p></div>
+        <p class="mini-legal">Only upload videos you own or are authorized to use. Editing does not guarantee copyright clearance or monetization.</p>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <div class="topbar">
+        <div class="breadcrumb"><span>WORKSPACE</span><span class="slash">/</span><strong id="pageCrumb">CREATE</strong></div>
+        <div class="topbar-actions"><span class="online-icon"></span><span id="systemState">Checking engine</span><span class="avatar">SF</span></div>
+      </div>
+
+      <div class="page-content" id="pageCreate">
+        <div class="page-heading">
+          <div class="eyebrow"><span class="sparkle">✧</span> YOUR CONTENT MULTIPLIED</div>
+          <h1>One long video.<br><span>Endless moments.</span></h1>
+          <p>Upload a video. Find the parts worth watching. Let Shorts Factory cut, caption, brand, and export your next batch.</p>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><span class="stat-icon icon-one">✂</span><div><strong id="statsClips">0</strong><span>Shorts created</span></div></div>
+          <div class="stat"><span class="stat-icon icon-two">◉</span><div><strong id="statsVideos">0</strong><span>Videos processed</span></div></div>
+          <div class="stat"><span class="stat-icon icon-three">⚡</span><div><strong>1080p</strong><span>Vertical exports</span></div></div>
+        </div>
+
+        <form id="createForm" class="form-grid">
+          <section class="panel upload-panel">
+            <div class="section-top"><div><span class="section-number">01</span><h2>Drop your source video</h2></div><span class="soft-tag">YOUR ORIGINAL FILE</span></div>
+            <input id="videoFile" type="file" accept=".mp4,.mov,.webm,.mkv,.m4v,video/*" hidden required>
+            <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Choose a video to upload">
+              <div class="upload-symbol"><svg viewBox="0 0 32 32" fill="none" aria-hidden="true"><rect x="4" y="6" width="24" height="20" rx="5" stroke="currentColor" stroke-width="1.7"/><path d="m13 11 9 5-9 5v-10Z" fill="currentColor"/></svg></div>
+              <strong id="dropHeadline">Drag & drop your video here</strong>
+              <p id="dropSubhead">MP4, MOV, WEBM, MKV and M4V supported</p>
+              <button type="button" class="browse-button" id="browseBtn">Browse video files <span>↗</span></button>
+              <span class="drop-size" id="uploadLimit">Maximum file size: 750 MB</span>
+            </div>
+            <div class="upload-note"><span>ⓘ</span> The editor works with files you upload. It does not download videos from YouTube or bypass other platforms.</div>
+            <div class="option-heading"><span class="section-number">02</span><h2>Your branding</h2></div>
+            <div class="branding-row">
+              <div class="brand-upload"><input type="file" id="logoFile" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" hidden><button type="button" class="logo-pick" id="logoPick"><span id="logoSymbol">＋</span></button><div><strong>Upload your logo</strong><span id="logoLabel">Optional PNG, JPG or WEBP</span></div></div>
+              <div class="brand-text"><label for="brandName">Or use a text watermark</label><input type="text" id="brandName" maxlength="55" placeholder="@yourpage"></div>
+            </div>
+          </section>
+
+          <section class="panel settings-panel">
+            <div class="section-top"><div><span class="section-number">03</span><h2>Make it yours</h2></div><span class="soft-tag purple">AUTO EDIT</span></div>
+            <div class="setting"><div class="setting-title"><label for="clipCount">Number of shorts</label><strong id="clipCountText">5 clips</strong></div><input id="clipCount" type="range" min="1" max="10" value="5"><div class="slider-labels"><span>1 clip</span><span>10 clips</span></div></div>
+            <div class="setting"><label for="clipLength">Target clip length</label><div class="select-wrap"><select id="clipLength"><option value="20">20 seconds — punchy</option><option value="30">30 seconds — quick</option><option value="45" selected>45 seconds — balanced</option><option value="60">60 seconds — story</option></select></div></div>
+            <div class="setting"><label>Vertical video layout</label><div class="choice-row" id="layoutGroup"><button type="button" class="choice active" data-layout="blur"><span class="layout-icon">▣</span><strong>Full frame</strong><small>Blurred background</small></button><button type="button" class="choice" data-layout="fill"><span class="layout-icon">▯</span><strong>Center crop</strong><small>Fill entire screen</small></button></div></div>
+            <div class="setting"><label for="captions">Animated subtitles</label><div class="select-wrap"><select id="captions"><option value="pop" selected>Pop — word highlights</option><option value="classic">Classic — clean subtitles</option><option value="none">Off — no subtitles</option></select></div></div>
+            <div class="setting rights-setting"><label for="rights">Copyright / reuse rights</label><div class="select-wrap"><select id="rights"><option value="unknown">Not sure — review before posting</option><option value="owned">I own the video and included content</option><option value="licensed">I have permission or a suitable license</option><option value="commentary">I'm making commentary / criticism</option></select></div><small>Fair use isn't automatic. Clips with a logo or captions can still be ineligible for monetization.</small></div>
+            <button class="generate-button" id="generateBtn" type="submit"><span>✦</span> Generate my shorts <span class="generate-arrow">↗</span></button>
+            <p class="settings-footer">No subscription. No API key. Processing speed depends on your server.</p>
+          </section>
+        </form>
+
+        <section id="activePanel" class="panel progress-panel hidden" aria-live="polite">
+          <div class="progress-top"><div><div class="eyebrow">PRODUCTION RUN</div><h2 id="progressHeadline">Processing your video</h2><p id="progressNote">Starting...</p></div><strong class="percent" id="progressPercent">0%</strong></div>
+          <div class="progress-track"><span id="progressFill"></span></div>
+          <div class="progress-steps"><span id="step1">01 · UPLOAD</span><span id="step2">02 · ANALYZE</span><span id="step3">03 · RENDER</span><span id="step4">04 · EXPORT</span></div>
+        </section>
+
+        <section id="results" class="results hidden"><div class="results-heading"><div><div class="eyebrow">EXPORT READY</div><h2>Your best moments</h2><p>Review your clips before posting. Scores are editing heuristics, not predictions of views.</p></div><button type="button" class="download-all" id="downloadAll">↓ Download all ZIP</button></div><div id="warnings"></div><div class="clips-grid" id="clipsGrid"></div><div class="monetize-note"><strong>Before you monetize</strong><p>Confirm rights to the source video, any music, voices, and visuals. Each platform separately evaluates originality, copyright, and monetization eligibility.</p></div></section>
+
+        <section class="history"><div class="history-heading"><h2>Recent creations</h2><button type="button" id="refreshBtn">↻ Refresh</button></div><div id="historyList" class="history-list"><div class="empty-history">Your first video will appear here.</div></div></section>
+      </div>
+
+      <div class="page-content hidden" id="pageLibrary"><div class="eyebrow">YOUR LIBRARY</div><h1 class="library-heading">Every great <span>moment.</span></h1><p class="library-intro">All your processing runs, downloadable exports, and their status in one place.</p><div id="libraryList" class="history-list library-list"></div></div>
+      <footer class="footer">SHORTS FACTORY <span>✦</span> CREATE MORE. SCROLL LESS. <small>© 2026 Shorts Factory</small></footer>
+    </main>
+  </div>
+
+  <div class="modal-backdrop hidden" id="authModal"><form class="auth-modal" id="authForm"><div class="auth-icon">▶</div><h2>Welcome to your studio</h2><p>Enter the private password configured for your Shorts Factory server.</p><label for="accessPassword">Access password</label><input type="password" id="accessPassword" autocomplete="current-password" placeholder="Your studio password" required><button type="submit" class="generate-button">Unlock studio <span>↗</span></button><span class="auth-error" id="authError"></span></form></div>
+  <div class="toast hidden" id="toast" role="status"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
