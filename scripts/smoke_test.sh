@@ -92,6 +92,27 @@ test "$finished" = "1"
 curl -fsS --max-time 40 -H "X-Access-Key: $TOKEN" \
   "$URL/api/jobs/$id/files/clip_01.mp4" -o "$DIR/clip_01.mp4"
 test -s "$DIR/clip_01.mp4"
+
+# Confirm private thumbnail generation works and returns real JPEG bytes.
+code="$(curl -sS -o /dev/null -w '%{http_code}' \
+  "$URL/api/jobs/$id/thumbnails/clip_01.mp4")"
+test "$code" = "401"
+curl -fsS --max-time 45 -H "X-Access-Key: $TOKEN" \
+  "$URL/api/jobs/$id/thumbnails/clip_01.mp4" -o "$DIR/clip_01.jpg"
+python - "$DIR/clip_01.jpg" <<'PY'
+import sys
+from pathlib import Path
+payload = Path(sys.argv[1]).read_bytes()
+assert len(payload) > 1000, len(payload)
+assert payload[:3] == b"\xff\xd8\xff", "Thumbnail is not a JPEG"
+print("A real rendered video thumbnail was generated.")
+PY
+curl -fsS --max-time 20 -H "X-Access-Key: $TOKEN" \
+  "$URL/api/jobs/$id/thumbnails/clip_01.mp4" -o "$DIR/clip_01_cached.jpg"
+cmp "$DIR/clip_01.jpg" "$DIR/clip_01_cached.jpg"
+code="$(curl -sS -H "X-Access-Key: $TOKEN" -o /dev/null -w '%{http_code}' \
+  "$URL/api/jobs/$id/thumbnails/clip_99.mp4")"
+test "$code" = "404"
 curl -fsS --max-time 40 -H "X-Access-Key: $TOKEN" \
   "$URL/api/jobs/$id/files/shorts_factory_export.zip" -o "$DIR/export.zip"
 test -s "$DIR/export.zip"
