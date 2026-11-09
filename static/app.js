@@ -568,6 +568,23 @@
       const clip = job?.clips?.[selectedClipIndex];
       if (clip) download(job.id, clip.file);
     });
+    $("stageCoverDownload").addEventListener("click", async () => {
+      const job = jobs.find(j => j.id === selectedJobId);
+      const clip = job?.clips?.[selectedClipIndex];
+      if (!job || !clip) return;
+      try {
+        const url = await thumbnailUrl(job.id, clip.file);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = clip.file.replace(".mp4", "-cover.jpg");
+        document.body.append(link);
+        link.click();
+        link.remove();
+        toast("Video cover downloaded as JPG.");
+      } catch (error) {
+        toast("Cover unavailable: " + error.message);
+      }
+    });
     $("stageCopy").addEventListener("click", async () => {
       const job = jobs.find(j => j.id === selectedJobId);
       const clip = job?.clips?.[selectedClipIndex];
