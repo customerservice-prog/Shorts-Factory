@@ -253,6 +253,7 @@
     button.disabled = true;
     button.textContent = "Uploading video...";
     $("activePanel").classList.remove("hidden");
+    document.body.classList.remove("show-editor");
     $("results").classList.add("hidden");
     $("progressHeadline").textContent = "Uploading source video...";
     $("progressNote").textContent = "Do not close this page until upload completes.";
@@ -372,6 +373,8 @@
     if (renderedResultsKey === fingerprint && !$("results").classList.contains("hidden")) return;
     renderedResultsKey = fingerprint;
     $("results").classList.remove("hidden");
+    document.body.classList.add("has-results");
+    document.body.classList.remove("show-editor");
     $("editorHeadline").textContent = "Create your next batch";
     $("resultsCount").textContent = (job.clips || []).length + " clips";
     $("stageQueueCount").textContent = (job.clips || []).length + " clips";
@@ -513,6 +516,7 @@
         selectedJobId = null;
         renderedResultsKey = "";
         $("results").classList.add("hidden");
+        document.body.classList.remove("has-results", "show-editor");
         $("editorHeadline").textContent = "Create your first batch";
       }
       if (activeJobId === jobId) { activeJobId = null; $("activePanel").classList.add("hidden"); }
@@ -577,12 +581,18 @@
         if (promptText !== null) toast("Caption available to copy.");
       }
     });
-    $("newProjectBtn").addEventListener("click", () => {
+    const openEditor = () => {
+      showPage("create", false);
+      document.body.classList.add("show-editor");
+      resetSource();
       $("createForm").scrollIntoView({behavior:"smooth",block:"start"});
-      $("videoFile").focus({preventScroll:true});
-    });
+    };
+    $("newProjectBtn").addEventListener("click", openEditor);
     $("refreshBtn").addEventListener("click", () => refreshJobs().catch((e) => toast(e.message)));
-    $("navCreate").addEventListener("click", () => showPage("create"));
+    $("navCreate").addEventListener("click", () => {
+      if (document.body.classList.contains("has-results")) openEditor();
+      else showPage("create");
+    });
     $("navLibrary").addEventListener("click", () => showPage("library"));
     $("authForm").addEventListener("submit", async (event) => {
       event.preventDefault();
