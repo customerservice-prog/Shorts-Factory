@@ -19,3 +19,5 @@ jobs:
         run: node --check static/app.js
       - name: Check Dockerfile build
         run: docker build -t shorts-factory-test .
+      - name: Test full container upload and export
+        run: bash scripts/smoke_test.sh
