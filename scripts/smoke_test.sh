@@ -35,8 +35,17 @@ assert health.get("status") == "ok"
 assert health.get("ffmpeg") and health.get("ffprobe"), health
 PY
 
+# A Railway persistent volume includes a protected lost+found directory.
+# The jobs-list endpoint and cleanup must skip it, never return 500.
+docker exec -u 0 "$NAME" sh -c 'mkdir -p /data/lost+found && chmod 000 /data/lost+found'
 code="$(curl -sS -o /dev/null -w '%{http_code}' "$URL/api/jobs")"
 test "$code" = "401"
+code="$(curl -sS -H "X-Access-Key: $TOKEN" -o "$DIR/jobs-before.json" -w '%{http_code}' "$URL/api/jobs")"
+test "$code" = "200"
+python - "$DIR/jobs-before.json" <<'PY'
+import json, sys
+assert json.load(open(sys.argv[1])) == {"jobs": []}
+PY
 
 # Generate an entirely synthetic test clip; no copyrighted source material.
 docker exec "$NAME" ffmpeg -hide_banner -loglevel error -y \
