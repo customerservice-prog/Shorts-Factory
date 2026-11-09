@@ -1,6 +1,7 @@
 import hmac
 import json
 import os
+import re
 import shutil
 import threading
 import time
@@ -12,7 +13,7 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from pipeline import make_shorts
+from pipeline import make_shorts, generate_thumbnail
 
 BASE = Path(os.getenv("DATA_DIR", "./data")).resolve()
 BASE.mkdir(parents=True, exist_ok=True)
@@ -22,6 +23,7 @@ PASSWORD = os.getenv("APP_PASSWORD", "")
 HOSTED = bool(os.getenv("RAILWAY_PROJECT_ID") or os.getenv("RENDER") or os.getenv("HOSTED_MODE"))
 EXECUTOR = ThreadPoolExecutor(max_workers=max(1, min(2, int(os.getenv("WORKERS", "1")))))
 LOCK = threading.RLock()
+THUMB_LOCK = threading.Lock()
 ALLOWED_VIDEOS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
 ALLOWED_LOGOS = {".png", ".webp", ".jpg", ".jpeg"}
 app = FastAPI(title="Shorts Factory", docs_url=None, redoc_url=None, openapi_url=None)
@@ -253,6 +255,38 @@ def get_output(job_id: str, filename: str, x_access_key: str | None = Header(def
     if not file_path.is_file():
         raise HTTPException(404, "File not found")
     return FileResponse(file_path, filename=filename, media_type="application/zip" if filename.endswith(".zip") else "video/mp4")
+
+
+@app.get("/api/jobs/{job_id}/thumbnails/{clip_filename}")
+def get_thumbnail(job_id: str, clip_filename: str, x_access_key: str | None = Header(default=None)):
+    """Authenticated, cached posters for current AND previously finished jobs."""
+    protect(x_access_key)
+    job = read_job(job_id)
+    if job.get("status") != "completed":
+        raise HTTPException(409, "Video is not yet ready")
+    if not re.fullmatch(r"clip_[0-9]{2}\.mp4", clip_filename):
+        raise HTTPException(404, "Clip not found")
+    clip = next((c for c in job.get("clips", []) if c.get("file") == clip_filename), None)
+    if clip is None:
+        raise HTTPException(404, "Clip not found")
+    output_dir = job_dir(job_id) / "outputs"
+    video = output_dir / clip_filename
+    cover = output_dir / clip_filename.replace(".mp4", ".jpg")
+    if not video.is_file():
+        raise HTTPException(404, "Clip file is missing")
+    if not cover.is_file():
+        with THUMB_LOCK:
+            if not cover.is_file():
+                temporary = output_dir / (cover.stem + "_pending.jpg")
+                try:
+                    generate_thumbnail(video, temporary, float(clip.get("length") or 20))
+                    temporary.replace(cover)
+                except (OSError, RuntimeError, ValueError) as exc:
+                    temporary.unlink(missing_ok=True)
+                    raise HTTPException(422, "Thumbnail preview could not be generated") from exc
+    return FileResponse(cover, media_type="image/jpeg",
+                        headers={"Cache-Control": "private, max-age=3600",
+                                 "X-Content-Type-Options": "nosniff"})
 
 
 @app.delete("/api/jobs/{job_id}")
