@@ -58,19 +58,34 @@
     });
   }
 
+  function resetSource() {
+    $("videoFile").value = "";
+    if (sourcePreviewUrl) {
+      $("sourcePreview").pause();
+      $("sourcePreview").removeAttribute("src");
+      $("sourcePreview").load();
+      URL.revokeObjectURL(sourcePreviewUrl);
+      sourcePreviewUrl = null;
+    }
+    $("sourceCard").classList.add("hidden");
+    $("dropzone").classList.remove("hidden", "dragging");
+    $("generateBtn").disabled = true;
+    $("generateText").textContent = "Choose a video to start";
+  }
+
   function setFile(file) {
     if (!file) return;
     const allowed = /\.(mp4|mov|mkv|webm|m4v)$/i.test(file.name);
     if (!allowed) {
-      $("videoFile").value = "";
+      resetSource();
       return toast("Choose MP4, MOV, MKV, WEBM or M4V video.");
     }
     if (!file.size) {
-      $("videoFile").value = "";
+      resetSource();
       return toast("That file is empty. Choose a different video.");
     }
     if (config && file.size > config.max_upload_mb * 1024 * 1024) {
-      $("videoFile").value = "";
+      resetSource();
       return toast("That video is over the " + config.max_upload_mb + " MB limit.");
     }
     const dt = new DataTransfer();
@@ -238,8 +253,6 @@
     $("historyList").innerHTML = html;
     $("libraryList").innerHTML = html;
     const complete = jobs.filter((j) => j.status === "completed");
-    if ($("statsVideos")) $("statsVideos").textContent = complete.length;
-    if ($("statsClips")) $("statsClips").textContent = complete.reduce((sum, j) => sum + (j.clips || []).length, 0);
     $("navCount").textContent = jobs.length;
   }
 
