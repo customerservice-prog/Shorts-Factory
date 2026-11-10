@@ -358,6 +358,13 @@
     });
     $("brandProfile").addEventListener("change", () => updateBrandPreview());
     $("saveBrandBtn").addEventListener("click", saveChannelProfile);
+    $("targetPlatform").addEventListener("change", () => {
+      if ($("targetPlatform").value === "tiktok_rewards" && Number($("clipLength").value) < 90) {
+        $("clipLength").value = "90";
+        updateSummary();
+        toast("Target switched to 90 seconds for TikTok Creator Rewards. Source must support clips longer than 60 seconds.");
+      }
+    });
     $("createForm").addEventListener("submit", create);
   }
 

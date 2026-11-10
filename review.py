@@ -14,7 +14,7 @@ AD_SENSITIVE = {
     "cabron", "cabrones", "coño", "mierda", "puta", "putas", "pendejo",
 }
 MUSIC_VIDEO = re.compile(r"\b(official (music )?video|video oficial|visualizer|lyric video)\b", re.I)
-PLATFORMS = {"youtube_shorts", "facebook_reels", "tiktok_rewards", "other"}
+PLATFORMS = {"youtube_shorts", "facebook_reels", "instagram_reels", "tiktok_rewards", "other"}
 RIGHTS = {"owned", "licensed", "commentary", "unknown"}
 AUDIO_RIGHTS = {"owned", "licensed", "no_music", "unknown"}
 ORIGINALITY = {"original", "substantial_commentary", "minimal", "unknown"}
@@ -96,8 +96,14 @@ def risk_review(job, clips, words, language, source_duration, has_audio):
         findings.append(item("high", "Filename suggests an existing music video",
                              "Confirm rights from relevant visual, composition and master owners before monetizing clips."))
     if platform == "tiktok_rewards":
-        findings.append(item("high", "TikTok Creator Rewards duration",
-                             "This program requires videos longer than one minute; 20–60-second exports do not qualify."))
+        findings.append(item("review", "TikTok Creator Rewards video requirements",
+                             "Video must be longer than 60 seconds, original, high-quality and your account must be enrolled and eligible."))
+    if platform == "instagram_reels":
+        findings.append(item("review", "Instagram monetization is feature/account specific",
+                             "Reels aren't automatically paid. Check your professional account's available earning features and current Meta eligibility policies."))
+    if platform in ("facebook_reels", "instagram_reels") and originality != "original":
+        findings.append(item("high", "Meta originality review",
+                             "Captions, cropping, logos, reaction faces and simple narration over other creators' footage may still be unoriginal. Add truly new information, analysis or storytelling."))
     if platform == "youtube_shorts":
         findings.append(item("review", "YouTube Shorts reused-content and channel review",
                              "Check originality, advertiser suitability and channel eligibility after upload."))

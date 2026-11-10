@@ -244,7 +244,7 @@ async def create_job(
     protect(x_access_key)
     if clip_count not in range(1, 11):
         raise HTTPException(400, "Choose 1 to 10 clips.")
-    if clip_length not in (20, 30, 45, 60):
+    if clip_length not in (20, 30, 45, 60, 90):
         raise HTTPException(400, "Unsupported clip length.")
     if layout not in ("blur", "fill", "left", "right"):
         raise HTTPException(400, "Unsupported video layout.")
@@ -256,6 +256,8 @@ async def create_job(
         raise HTTPException(400, "Unsupported rights or platform review settings.")
     if len(rights_evidence) > 500:
         raise HTTPException(400, "The rights reference is too long.")
+    if target_platform == "tiktok_rewards" and clip_length < 90:
+        clip_length = 90  # Automatic target to exceed the 60-second threshold.
     try:
         selected_logo = brand_path(brand_id)
     except (OSError, ValueError, RuntimeError) as exc:
