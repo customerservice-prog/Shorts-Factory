@@ -374,9 +374,12 @@
     if (!video) return toast("Please choose a video first.");
     if (config?.needs_setup) return toast("Set APP_PASSWORD in your server environment first.");
     if ($("brandProfile").value === "new") return toast("Save your new channel logo before creating clips.");
+    if ($("coverOldBrand").value !== "none" && !["owned", "licensed"].includes($("rights").value)) {
+      return toast("Replacing an old logo requires owned or licensed footage."); }
     const form = new FormData();
     form.append("video", video);
     form.append("brand_id", $("brandProfile").value);
+    form.append("cover_old_brand", $("coverOldBrand").value);
     form.append("audio_rights", $("audioRights").value);
     form.append("originality", $("originality").value);
     form.append("target_platform", $("targetPlatform").value);

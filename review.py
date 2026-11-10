@@ -92,6 +92,9 @@ def risk_review(job, clips, words, language, source_duration, has_audio):
     elif originality == "substantial_commentary":
         findings.append(item("review", "Original commentary must be reviewed",
                              "Verify that substantial new analysis, narration or original storytelling is audible and visible."))
+    if job.get("cover_old_brand", "none") != "none":
+        findings.append(item("review", "Previous branding was covered",
+                             "This cosmetic edit is not copyright clearance or proof of original content. Confirm permission to replace prior branding."))
     if MUSIC_VIDEO.search(job.get("filename", "")):
         findings.append(item("high", "Filename suggests an existing music video",
                              "Confirm rights from relevant visual, composition and master owners before monetizing clips."))

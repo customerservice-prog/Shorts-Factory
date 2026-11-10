@@ -255,7 +255,7 @@ def write_captions(path: Path, words, start: float, end: float, mode: str):
     return True
 
 
-def render_clip(source, destination, start, end, layout, captions_file, brand, logo, audio):
+def render_clip(source, destination, start, end, layout, captions_file, brand, logo, audio, cover_old_brand="none"):
     args = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
             "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", str(source)]
     if logo:
@@ -273,6 +273,24 @@ def render_clip(source, destination, start, end, layout, captions_file, brand, l
                        "setsar=1[front]")
         filters.append("[back][front]overlay=(W-w)/2:(H-h)/2[canvas]")
     current = "canvas"
+    if cover_old_brand != "none":
+        # Blur a small selected corner for footage the user is authorized to rebrand.
+        # No attempt at identifying third-party marks or bypassing rights controls.
+        positions = {
+            "top_left": ("0", "0"),
+            "top_right": ("iw-320", "0"),
+            "bottom_left": ("0", "ih-195"),
+            "bottom_right": ("iw-320", "ih-195"),
+        }
+        if cover_old_brand not in positions:
+            raise ValueError("Unsupported old brand area")
+        px, py = positions[cover_old_brand]
+        ox = px.replace("iw", "W")
+        oy = py.replace("ih", "H")
+        filters.append(f"[{current}]split=2[coverbase][coverpatch]")
+        filters.append(f"[coverpatch]crop=320:195:{px}:{py},boxblur=24:1[masked]")
+        filters.append(f"[coverbase][masked]overlay={ox}:{oy}[covered]")
+        current = "covered"
     if logo:
         filters.append("[1:v]format=rgba,scale=240:-2[logomark]")
         filters.append(f"[{current}][logomark]overlay=W-w-38:45:eof_action=repeat[branded]")
@@ -363,7 +381,8 @@ def make_shorts(job: dict, directory: Path, progress):
                  "rendering", f"Rendering vertical clip {index} of {len(candidates)}...")
         render_clip(source, destination, selected["start"], selected["end"],
                     job["layout"], caption_file if has_captions else None,
-                    job["brand_name"], logo, has_audio)
+                    job["brand_name"], logo, has_audio,
+                    job.get("cover_old_brand", "none"))
         technical = inspect_export(destination, selected["end"] - selected["start"], has_audio)
         clips.append({
             "technical": technical,
@@ -386,6 +405,8 @@ def make_shorts(job: dict, directory: Path, progress):
             bundle.write(out_dir / clip["file"], arcname=clip["file"])
         bundle.writestr("clips.json", json.dumps({
             "source": job["filename"], "rights_selected": job["rights"],
+            "channel": job.get("channel_name"), "brand_id": job.get("brand_id"),
+            "previous_brand_cover": job.get("cover_old_brand", "none"),
             "clips": clips, "warnings": warnings, "review": review,
             "note": "Export does not establish copyright clearance or monetization eligibility.",
         }, indent=2))

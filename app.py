@@ -234,6 +234,7 @@ async def create_job(
     captions: str = Form(default="pop"),
     brand_name: str = Form(default=""),
     brand_id: str = Form(default="bajo-mundo"),
+    cover_old_brand: str = Form(default="none"),
     rights: str = Form(default="unknown"),
     audio_rights: str = Form(default="unknown"),
     originality: str = Form(default="unknown"),
@@ -254,6 +255,10 @@ async def create_job(
         raise HTTPException(400, "Unsupported source-rights selection.")
     if audio_rights not in AUDIO_RIGHTS or originality not in ORIGINALITY or target_platform not in PLATFORMS:
         raise HTTPException(400, "Unsupported rights or platform review settings.")
+    if cover_old_brand not in ("none", "top_left", "top_right", "bottom_left", "bottom_right"):
+        raise HTTPException(400, "Unsupported previous logo location.")
+    if cover_old_brand != "none" and rights not in ("owned", "licensed"):
+        raise HTTPException(400, "Replacing previous branding requires rights to this footage.")
     if len(rights_evidence) > 500:
         raise HTTPException(400, "The rights reference is too long.")
     if target_platform == "tiktok_rewards" and clip_length < 90:
@@ -290,6 +295,7 @@ async def create_job(
             "rights": rights, "source": str(source_path),
             "logo": str(logo_path) if logo_path else None,
             "brand_id": brand_id if not (logo and logo_suffix) else "custom-upload",
+            "cover_old_brand": cover_old_brand,
             "channel_name": selected_channel if not (logo and logo_suffix) else "Uploaded channel logo",
             "audio_rights": audio_rights, "originality": originality,
             "target_platform": target_platform, "rights_evidence": rights_evidence.strip(),
