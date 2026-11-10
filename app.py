@@ -1,6 +1,8 @@
 import hmac
 import json
 import os
+import zipfile
+from copy import deepcopy
 import re
 import shutil
 import tempfile
@@ -14,9 +16,9 @@ from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from pipeline import make_shorts, generate_thumbnail
+from pipeline import make_shorts, generate_thumbnail, probe_video, render_clip
 from branding import BRAND_DIR, PROFILE_ID, brand_path, list_brands, save_brand
-from review import PLATFORMS, AUDIO_RIGHTS, ORIGINALITY
+from review import PLATFORMS, AUDIO_RIGHTS, ORIGINALITY, inspect_export, risk_review
 
 BASE = Path(os.getenv("DATA_DIR", "./data")).resolve()
 BASE.mkdir(parents=True, exist_ok=True)
@@ -319,6 +321,139 @@ async def create_job(
         raise
 
 
+
+def _reframe_worker(job_id: str, source_filename: str, focus: str, output_name: str):
+    """Non-destructive edit of an existing saved clip from its original footage."""
+    folder = job_dir(job_id)
+    out_dir = folder / "outputs"
+    temporary = out_dir / ("_pending_" + output_name)
+    destination = out_dir / output_name
+    try:
+        update_job(job_id, reframe={"status": "rendering", "file": output_name,
+                                    "focus": focus, "source_clip": source_filename})
+        job = read_job(job_id)
+        original = next(c for c in job["clips"] if c["file"] == source_filename)
+        source = Path(job["source"])
+        if not source.is_file():
+            raise RuntimeError("Original uploaded video is no longer available")
+        duration, has_audio = probe_video(source)
+        captions_name = "captions_" + source_filename[5:7] + ".ass"
+        captions_path = folder / captions_name
+        subtitle = captions_path if original.get("captions") and captions_path.is_file() else None
+        logo = Path(job["logo"]) if job.get("logo") else None
+        if logo is not None and not logo.is_file():
+            raise RuntimeError("The original selected logo is no longer available")
+        render_clip(source, temporary,
+                    float(original["start"]), float(original["end"]), focus,
+                    subtitle, job.get("brand_name", ""), logo, has_audio,
+                    job.get("cover_old_brand", "none"))
+        technical = inspect_export(temporary,
+                                   float(original["end"]) - float(original["start"]),
+                                   has_audio)
+        temporary.replace(destination)
+        with LOCK:
+            latest = read_job(job_id)
+            old_clip = next(c for c in latest["clips"] if c["file"] == source_filename)
+            variant = {key: deepcopy(value) for key, value in old_clip.items()
+                       if key not in ("file", "technical", "review")}
+            variant.update({"file": output_name, "technical": technical,
+                            "layout": focus, "source_clip": source_filename,
+                            "title": old_clip.get("title", "Highlight") + " · " + focus + " focus"})
+            if "review" not in latest or not latest["review"]:
+                latest["review"] = risk_review(
+                    latest, latest["clips"], [], "", duration, has_audio)
+            # Keep original per-clip audit details, add a real manual composition check.
+            report = deepcopy(old_clip.get("review") or
+                              (latest["review"].get("clip_reviews") or [{}])[0])
+            report["file"] = output_name
+            report["clip"] = len(latest["clips"]) + 1
+            report["status"] = "manual_review_required"
+            report.setdefault("checks", []).append({
+                "level": "review", "title": "Check the new focus and embedded overlays",
+                "detail": "This crop changes the visible composition, not source rights. "
+                          "Watch the complete result for cut-off faces, existing captions "
+                          "and channel marks before publishing."
+            })
+            variant["review"] = report
+            new_clips = latest["clips"] + [variant]
+            review = latest["review"]
+            review.setdefault("clip_reviews", []).append(report)
+            # Rebuild the ZIP without modifying any original MP4.
+            zip_name = latest.get("zip_file") or "shorts_factory_export.zip"
+            zip_pending = out_dir / "_pending_export.zip"
+            with zipfile.ZipFile(zip_pending, "w", zipfile.ZIP_STORED) as archive:
+                for clip in new_clips:
+                    archive.write(out_dir / clip["file"], arcname=clip["file"])
+                archive.writestr("clips.json", json.dumps({
+                    "source": latest.get("filename"),
+                    "clips": new_clips, "review": review,
+                    "note": "Exports require human rights and monetization review."
+                }, ensure_ascii=False, indent=2))
+            zip_pending.replace(out_dir / zip_name)
+            latest.update({"clips": new_clips, "review": review, "zip_file": zip_name,
+                           "reframe": {"status": "ready", "file": output_name, "focus": focus,
+                                       "source_clip": source_filename},
+                           "updated_at": int(time.time())})
+            save_job(latest)
+    except Exception as exc:
+        temporary.unlink(missing_ok=True)
+        destination.unlink(missing_ok=True)
+        with LOCK:
+            try:
+                update_job(job_id, reframe={
+                    "status": "failed", "file": output_name, "focus": focus,
+                    "source_clip": source_filename,
+                    "error": "Could not create this focused version. " + str(exc)[:180]
+                })
+            except HTTPException:
+                pass
+
+
+@app.post("/api/jobs/{job_id}/reframe", status_code=202)
+def reframe_saved_clip(
+    job_id: str,
+    clip_file: str = Form(...),
+    focus: str = Form(...),
+    rights_confirmed: bool = Form(False),
+    x_access_key: str | None = Header(default=None),
+):
+    protect(x_access_key)
+    if not rights_confirmed:
+        raise HTTPException(400, "Confirm you own or are permitted to re-edit this footage.")
+    if focus not in ("left", "right", "fill"):
+        raise HTTPException(400, "Choose left, right or full-frame focus.")
+    if not re.fullmatch(r"clip_[0-9]{2}\.mp4", clip_file):
+        raise HTTPException(400, "Reframe one original clip at a time.")
+    with LOCK:
+        job = read_job(job_id)
+        if job.get("status") != "completed":
+            raise HTTPException(409, "Clip is not ready")
+        if not any(c.get("file") == clip_file for c in job.get("clips", [])):
+            raise HTTPException(404, "Original clip not found")
+        if job.get("reframe", {}).get("status") in ("queued", "rendering"):
+            raise HTTPException(409, "A focused version is already processing.")
+        if len(job.get("clips", [])) >= 20:
+            raise HTTPException(409, "Maximum of 20 versions in this project.")
+        if not Path(job.get("source", "")).is_file():
+            raise HTTPException(409, "The original source is unavailable; upload again.")
+        # One immutable filename per operation; existing results are never overwritten.
+        version = 1
+        while True:
+            candidate = f"{clip_file[:-4]}_focus_{focus}_{version:02}.mp4"
+            if not (job_dir(job_id) / "outputs" / candidate).exists():
+                break
+            version += 1
+            if version > 99:
+                raise HTTPException(409, "Too many focused versions.")
+        update_job(job_id, reframe={
+            "status": "queued", "file": candidate,
+            "source_clip": clip_file, "focus": focus
+        })
+    EXECUTOR.submit(_reframe_worker, job_id, clip_file, focus, candidate)
+    return {"status": "queued", "file": candidate,
+            "detail": "A new focused copy is being rendered; original clip is unchanged."}
+
+
 @app.get("/api/jobs/{job_id}/files/{filename}")
 def get_output(job_id: str, filename: str, x_access_key: str | None = Header(default=None)):
     protect(x_access_key)
@@ -341,7 +476,7 @@ def get_thumbnail(job_id: str, clip_filename: str, x_access_key: str | None = He
     job = read_job(job_id)
     if job.get("status") != "completed":
         raise HTTPException(409, "Video is not yet ready")
-    if not re.fullmatch(r"clip_[0-9]{2}\.mp4", clip_filename):
+    if not re.fullmatch(r"clip_[0-9]{2}(?:_focus_(?:left|right|fill)_[0-9]{2})?\.mp4", clip_filename):
         raise HTTPException(404, "Clip not found")
     clip = next((c for c in job.get("clips", []) if c.get("file") == clip_filename), None)
     if clip is None:
@@ -370,7 +505,7 @@ def get_thumbnail(job_id: str, clip_filename: str, x_access_key: str | None = He
 def delete_job(job_id: str, x_access_key: str | None = Header(default=None)):
     protect(x_access_key)
     job = read_job(job_id)
-    if job["status"] in ("queued", "analyzing", "rendering"):
+    if job["status"] in ("queued", "analyzing", "rendering") or job.get("reframe", {}).get("status") in ("queued", "rendering"):
         raise HTTPException(409, "Cannot delete an active processing job")
     shutil.rmtree(job_dir(job_id))
     return {"deleted": True}
