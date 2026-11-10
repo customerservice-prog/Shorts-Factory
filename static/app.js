@@ -6,7 +6,9 @@
   let jobs = [];
   let activeJobId = null;
   let selectedJobId = null;
-  let layout = "blur";
+  let layout = "fill";
+  let channelProfiles = [];
+  let brandPreviewUrl = null;
   let currentPreview = null;
   let toastTimer = null;
 
@@ -105,6 +107,129 @@
     balanced: { count: 5, length: "45", captions: "pop" },
     story: { count: 3, length: "60", captions: "classic" }
   };
+
+
+  async function loadBrands(selectedId = "bajo-mundo") {
+    const response = await api("/api/brands");
+    const data = await response.json();
+    channelProfiles = data.brands || [];
+    const select = $("brandProfile");
+    const safe = channelProfiles.some(p => p.id === selectedId) ? selectedId : "bajo-mundo";
+    select.replaceChildren();
+    for (const brand of channelProfiles) {
+      const option = document.createElement("option");
+      option.value = brand.id; option.textContent = brand.name;
+      select.appendChild(option);
+    }
+    const custom = document.createElement("option");
+    custom.value = "new"; custom.textContent = "+ Add another channel";
+    select.appendChild(custom); select.value = safe;
+    await updateBrandPreview();
+  }
+
+  async function updateBrandPreview() {
+    const id = $("brandProfile").value;
+    const isNew = id === "new";
+    $("newBrandControls").classList.toggle("hidden", !isNew);
+    const brand = channelProfiles.find(p => p.id === id);
+    $("brandPreviewName").textContent = isNew ? "New channel" : brand?.name || "No logo";
+    $("brandPreviewDescription").textContent = isNew ? "Save this profile before generating" :
+      id === "none" ? "Exports will not display a channel logo" : "Added automatically to new exports";
+    if (brandPreviewUrl) { URL.revokeObjectURL(brandPreviewUrl); brandPreviewUrl = null; }
+    $("brandPreviewImg").hidden = true;
+    $("brandPreviewImg").removeAttribute("src");
+    $("brandPreviewFallback").hidden = false;
+    $("brandPreviewFallback").textContent = id === "none" ? "—" : "TV";
+    if (brand?.logo_url) {
+      try {
+        const response = await api(brand.logo_url);
+        const url = URL.createObjectURL(await response.blob());
+        if ($("brandProfile").value !== id) { URL.revokeObjectURL(url); return; }
+        brandPreviewUrl = url;
+        $("brandPreviewImg").src = url; $("brandPreviewImg").hidden = false;
+        $("brandPreviewFallback").hidden = true;
+      } catch (_) {
+        $("brandPreviewDescription").textContent = "Logo preview unavailable. Choose another channel.";
+      }
+    }
+  }
+
+  async function saveChannelProfile() {
+    if (!$("logoFile").files[0]) return toast("Choose a new channel logo first.");
+    if (!$("newChannelName").value.trim()) return toast("Enter the channel name.");
+    $("saveBrandBtn").disabled = true;
+    try {
+      const form = new FormData();
+      form.append("name", $("newChannelName").value.trim());
+      form.append("logo", $("logoFile").files[0]);
+      const response = await api("/api/brands", { method: "POST", body: form });
+      const saved = await response.json();
+      $("logoFile").value = "";
+      $("newChannelName").value = "";
+      $("logoLabel").textContent = "Transparent PNG recommended";
+      $("logoSymbol").textContent = "＋";
+      await loadBrands(saved.id);
+      toast("Channel profile saved. The next export will use its logo.");
+    } catch (error) {
+      toast("Unable to save channel: " + error.message);
+    } finally {
+      $("saveBrandBtn").disabled = false;
+    }
+  }
+
+  function renderPublishingReview(job) {
+    const review = job.review;
+    $("reviewFlags").replaceChildren();
+    if (!review) {
+      $("reviewStatus").textContent = "Older export · not audited";
+      $("clipReview").textContent = "This export predates the automated checks. Copyright and monetization were not verified.";
+      return;
+    }
+    $("reviewStatus").textContent = review.status === "high_risk" ?
+      "High risk · review first" : "Manual review required";
+    for (const finding of review.source_findings || []) {
+      const wrap = document.createElement("div");
+      wrap.className = "review-flag " + (finding.level || "review");
+      const heading = document.createElement("strong"); heading.textContent = finding.title;
+      const detail = document.createElement("p"); detail.textContent = finding.detail;
+      wrap.append(heading, detail);
+      $("reviewFlags").appendChild(wrap);
+    }
+    renderSelectedReview(job);
+  }
+
+  function renderSelectedReview(job) {
+    const destination = $("clipReview");
+    destination.replaceChildren();
+    const report = job?.review?.clip_reviews?.[selectedClipIndex];
+    const clip = job?.clips?.[selectedClipIndex];
+    if (!report || !clip) {
+      destination.textContent = "No per-clip audit available for this export.";
+      return;
+    }
+    const headline = document.createElement("h4");
+    headline.textContent = "Clip " + pad(selectedClipIndex + 1) + " · technical + content review";
+    destination.appendChild(headline);
+    const tech = document.createElement("p");
+    tech.textContent = clip.technical?.verified ?
+      "TECHNICAL PASS — 1080 × 1920 H.264" + (clip.technical.audio ? " · AAC audio" : "") +
+      " · " + clock(clip.technical.duration) + ". This is not a monetization approval." :
+      "Technical export has not been verified.";
+    destination.appendChild(tech);
+    const list = document.createElement("ul");
+    const findings = report.checks || [];
+    for (const flag of findings) {
+      const line = document.createElement("li");
+      line.textContent = flag.title + " — " + flag.detail;
+      list.appendChild(line);
+    }
+    if (!findings.length) {
+      const li = document.createElement("li");
+      li.textContent = "No additional automatic warnings detected. Manual rights and originality review still required.";
+      list.appendChild(li);
+    }
+    destination.appendChild(list);
+  }
 
   function updateSummary() {
     const count = Number($("clipCount").value);
@@ -231,6 +356,8 @@
         document.querySelectorAll("[data-layout]").forEach((b) => b.classList.toggle("active", b === button));
       });
     });
+    $("brandProfile").addEventListener("change", () => updateBrandPreview());
+    $("saveBrandBtn").addEventListener("click", saveChannelProfile);
     $("createForm").addEventListener("submit", create);
   }
 
@@ -239,9 +366,14 @@
     const video = $("videoFile").files[0];
     if (!video) return toast("Please choose a video first.");
     if (config?.needs_setup) return toast("Set APP_PASSWORD in your server environment first.");
+    if ($("brandProfile").value === "new") return toast("Save your new channel logo before creating clips.");
     const form = new FormData();
     form.append("video", video);
-    if ($("logoFile").files[0]) form.append("logo", $("logoFile").files[0]);
+    form.append("brand_id", $("brandProfile").value);
+    form.append("audio_rights", $("audioRights").value);
+    form.append("originality", $("originality").value);
+    form.append("target_platform", $("targetPlatform").value);
+    form.append("rights_evidence", $("rightsEvidence").value);
     form.append("clip_count", $("clipCount").value);
     form.append("clip_length", $("clipLength").value);
     form.append("layout", layout);
@@ -381,6 +513,7 @@
     $("resultsSource").textContent = job.filename;
     $("resultsTotal").textContent = (job.clips || []).length + " finished edits";
     $("warnings").innerHTML = (job.warnings || []).map(w => '<div class="warning">' + esc(w) + '</div>').join("");
+    renderPublishingReview(job);
     $("clipsGrid").innerHTML = (job.clips || []).map((clip,i) => buildClipCard(job,clip,i)).join("");
     $("clipQueue").innerHTML = (job.clips || []).map((clip,i) => buildQueueItem(job,clip,i)).join("");
     hydrateThumbnails($("clipsGrid"));
@@ -394,6 +527,7 @@
     if (!job || !job.clips || !job.clips[index]) return;
     clearVideoPreview();
     selectedClipIndex = index;
+    renderSelectedReview(job);
     const clip = job.clips[index];
     const total = job.clips.length;
     $("stageNumber").textContent = "CLIP " + pad(index + 1);
@@ -451,6 +585,9 @@
     try {
       const response = await api("/api/jobs");
       jobs = (await response.json()).jobs || [];
+      if (!channelProfiles.length) {
+        try { await loadBrands(); } catch (error) { toast("Branding unavailable: " + error.message); }
+      }
       $("systemState").textContent = "Engine ready";
       renderHistory();
       const working = jobs.find(j => ["queued", "analyzing", "rendering"].includes(j.status));
