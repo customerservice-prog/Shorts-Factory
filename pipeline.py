@@ -262,8 +262,8 @@ def render_clip(source, destination, start, end, layout, captions_file, brand, l
         args.extend(["-i", str(logo)])
     filters = []
     if layout in ("fill", "left", "right"):
-        horizontal = {"fill": "(iw-1080)/2", "left": "max(0,iw/4-540)",
-                      "right": "min(iw-1080,3*iw/4-540)"}[layout]
+        horizontal = {"fill": "(iw-1080)/2", "left": "(iw-1080)/8",
+                      "right": "(iw-1080)*7/8"}[layout]
         filters.append("[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
                        f"crop=1080:1920:{horizontal}:(ih-1920)/2,setsar=1[canvas]")
     else:
