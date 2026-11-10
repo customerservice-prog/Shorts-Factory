@@ -76,7 +76,7 @@ class ExportIntegrationTests(unittest.TestCase):
             def center_pixel(path):
                 raw=subprocess.run([
                     "ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", "1",
-                    "-i", str(path), "-vf", "crop=1:1:540:960,format=rgb24",
+                    "-i", str(path), "-vf", "crop=2:2:540:960,format=rgb24",
                     "-frames:v", "1", "-f", "rawvideo", "pipe:1"
                 ], check=True, capture_output=True, timeout=35).stdout
                 return tuple(raw[:3])
