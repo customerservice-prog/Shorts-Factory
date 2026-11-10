@@ -1,5 +1,5 @@
 fastapi==0.118.0
 uvicorn==0.37.0
-python-multipart==0.0.20
+python-multipart==0.0.31
 faster-whisper==1.2.1
 Pillow>=11.0,<13.0
