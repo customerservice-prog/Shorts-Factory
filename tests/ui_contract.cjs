@@ -13,7 +13,7 @@ for (const id of idsUsed) assert.ok(ids.includes(id), "JS expects missing elemen
 
 for (const id of ["results", "clipsGrid", "clipQueue", "featuredVideo", "featuredPoster",
   "stageBackdrop", "stagePlay", "stageDownload", "stageCoverDownload", "stageCopy",
-  "newProjectBtn", "activePanel", "createForm", "editorHeadline"]) {
+  "newProjectBtn", "activePanel", "createForm", "editorHeadline", "preflightPanel", "preflightChecks", "preflightState"]) {
   assert.ok(ids.includes(id), "Review studio lacks: " + id);
 }
 
@@ -22,6 +22,7 @@ assert.ok(script.includes("thumbnailUrl("), "Thumbnail loader missing");
 assert.ok(script.includes("clip.file"), "Clip identity not preserved");
 assert.ok(script.includes("data-select"), "Playlist/gallery selection missing");
 assert.ok(script.includes("playSelectedClip"), "Video preview interaction missing");
+assert.ok(script.includes("updatePreflight"), "Pre-render checks must run before generation");
 assert.ok(script.includes("URL.revokeObjectURL"), "Blob URL cleanup missing");
 assert.ok(backend.includes('@app.get("/api/jobs/{job_id}/thumbnails/{clip_filename}")'), "Thumbnail API missing");
 assert.ok(backend.includes("protect(x_access_key)"), "Authentication guard missing");

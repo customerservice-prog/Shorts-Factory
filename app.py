@@ -102,7 +102,12 @@ def iter_job_folders(newest_first: bool = False) -> list[Path]:
 
 
 def cleanup_old_jobs():
-    age_limit = int(os.getenv("JOB_TTL_HOURS", "48")) * 3600
+    # Keep finished projects by default. Cleanup is explicit opt-in because
+    # exported videos and source uploads may be valuable user-created work.
+    ttl_hours = int(os.getenv("JOB_TTL_HOURS", "0"))
+    if ttl_hours <= 0:
+        return
+    age_limit = ttl_hours * 3600
     for folder in iter_job_folders():
         try:
             job = json.loads((folder / "job.json").read_text(encoding="utf-8"))

@@ -231,6 +231,62 @@
     destination.appendChild(list);
   }
 
+  function updatePreflight() {
+    const checks = $("preflightChecks");
+    const state = $("preflightState");
+    if (!checks || !state) return;
+    checks.replaceChildren();
+    const file = $("videoFile").files[0];
+    const flags = [];
+    if (!file) {
+      state.textContent = "Choose a video";
+      checks.textContent = "Select a video to see the pre-export checks.";
+      return;
+    }
+    const preview = $("sourcePreview");
+    const seconds = Number.isFinite(preview.duration) ? preview.duration : 0;
+    const platform = $("targetPlatform").value;
+    const selectedLength = Number($("clipLength").value);
+    const frame = preview.videoWidth && preview.videoHeight ?
+      preview.videoWidth + " × " + preview.videoHeight : "Dimensions pending";
+    flags.push(["info", "Source: " + frame + (seconds ? " · " + clock(seconds) : "")]);
+    const title = file.name.toLowerCase();
+    if (/official[\s_-]*(music[\s_-]*)?video|video[\s_-]*oficial|visualizer|lyric[\s_-]*video/.test(title)) {
+      flags.push(["warning", "This appears to be an existing music video; independently confirm all footage, composition and recording rights."]);
+    }
+    if ($("rights").value === "unknown") {
+      flags.push(["warning", "Footage rights have not been verified."]);
+    } else if ($("rights").value === "commentary") {
+      flags.push(["warning", "Commentary exceptions and platform originality require human review."]);
+    }
+    if ($("audioRights").value === "unknown") {
+      flags.push(["warning", "Music and audio rights have not been verified."]);
+    }
+    if (["minimal", "unknown"].includes($("originality").value)) {
+      flags.push(["warning", "A logo, crop or captions alone cannot establish originality for monetization."]);
+    }
+    if (seconds && seconds < selectedLength) {
+      flags.push(["warning", "The source is shorter than your requested " + selectedLength + "s target; the result may be shorter."]);
+    }
+    if (platform === "tiktok_rewards" && seconds && seconds <= 60) {
+      flags.push(["warning", "The source is too short to produce a video over 60 seconds for TikTok Creator Rewards."]);
+    }
+    if (preview.videoWidth && preview.videoHeight && preview.videoWidth > preview.videoHeight * 1.3 && layout === "fill") {
+      flags.push(["info", "Wide source: fill will crop the sides. Use left/right focus if the source is split-screen."]);
+    }
+    if ($("coverOldBrand").value !== "none") {
+      flags.push(["warning", "Covering an old corner logo is permitted only on footage you are authorized to rebrand."]);
+    }
+    for (const [level, message] of flags) {
+      const item = document.createElement("div");
+      item.className = "preflight-item " + level;
+      item.textContent = message;
+      checks.appendChild(item);
+    }
+    state.textContent = flags.some(flag => flag[0] === "warning") ?
+      "Publishing review needed" : "Technical preview ready";
+  }
+
   function updateSummary() {
     const count = Number($("clipCount").value);
     const length = Number($("clipLength").value);
@@ -243,6 +299,7 @@
       button.classList.toggle("selected", selected);
       button.setAttribute("aria-pressed", String(selected));
     });
+    updatePreflight();
   }
 
   function resetSource() {
@@ -258,6 +315,7 @@
     $("dropzone").classList.remove("hidden", "dragging");
     $("generateBtn").disabled = true;
     $("generateText").textContent = "Choose a video to start";
+    updatePreflight();
   }
 
   function setFile(file) {
@@ -288,6 +346,7 @@
       const seconds = Math.round(preview.duration);
       const duration = Math.floor(seconds / 60) + ":" + String(seconds % 60).padStart(2, "0");
       $("sourceMeta").textContent = duration + " min:sec · " + (file.size / 1048576).toFixed(1) + " MB";
+      updatePreflight();
     };
     preview.onerror = () => {
       $("sourceMeta").textContent = (file.size / 1048576).toFixed(1) + " MB · Preview unavailable (file may still process)";
@@ -354,9 +413,13 @@
       button.addEventListener("click", () => {
         layout = button.dataset.layout;
         document.querySelectorAll("[data-layout]").forEach((b) => b.classList.toggle("active", b === button));
+        updatePreflight();
       });
     });
-    $("brandProfile").addEventListener("change", () => updateBrandPreview());
+    $("brandProfile").addEventListener("change", () => { updateBrandPreview(); updatePreflight(); });
+    for (const id of ["rights", "audioRights", "originality", "targetPlatform", "coverOldBrand"]) {
+      $(id).addEventListener("change", updatePreflight);
+    }
     $("saveBrandBtn").addEventListener("click", saveChannelProfile);
     $("targetPlatform").addEventListener("change", () => {
       if ($("targetPlatform").value === "tiktok_rewards" && Number($("clipLength").value) < 90) {
