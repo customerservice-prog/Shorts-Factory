@@ -28,6 +28,26 @@ for _ in $(seq 1 45); do
   sleep 2
 done
 test "$ready" = "1"
+# Confirm channel branding is private and built-in asset returns a real PNG.
+test "$(curl -sS -o /dev/null -w '%{http_code}' "$URL/api/brands")" = "401"
+curl -fsS -H "X-Access-Key: $TOKEN" "$URL/api/brands" > "$DIR/brands.json"
+python - "$DIR/brands.json" <<'PY'
+import json,sys
+brands=json.load(open(sys.argv[1]))
+assert brands["default"] == "bajo-mundo"
+assert any(x["id"]=="bajo-mundo" for x in brands["brands"])
+PY
+curl -fsS --max-time 60 -H "X-Access-Key: $TOKEN" "$URL/api/brands/bajo-mundo/logo" -o "$DIR/logo.png"
+python - "$DIR/logo.png" <<'PY'
+from PIL import Image
+import sys
+with Image.open(sys.argv[1]) as img:
+    assert img.mode == "RGBA"
+    assert img.size[0] > 100
+    alpha = img.getchannel("A")
+    assert alpha.getextrema()[0] == 0, "Logo must have transparent background"
+PY
+
 python - "$DIR/health.json" <<'PY'
 import json, sys
 health = json.load(open(sys.argv[1]))
@@ -121,6 +141,9 @@ python - "$DIR/export.zip" "$DIR/status.json" <<'PY'
 import json, sys, zipfile
 job = json.load(open(sys.argv[2]))
 assert len(job["clips"]) == 1, job
+assert job["review"]["monetization_guaranteed"] is False
+assert job["clips"][0]["technical"]["verified"] is True
+assert job["brand_id"] == "bajo-mundo"
 with zipfile.ZipFile(sys.argv[1]) as zipped:
     assert "clip_01.mp4" in zipped.namelist()
     assert "clips.json" in zipped.namelist()
