@@ -150,6 +150,62 @@ cmp "$DIR/clip_01.jpg" "$DIR/clip_01_cached.jpg"
 code="$(curl -sS -H "X-Access-Key: $TOKEN" -o /dev/null -w '%{http_code}' \
   "$URL/api/jobs/$id/thumbnails/clip_99.mp4")"
 test "$code" = "404"
+# Create a new focused version of a finished clip, without overwriting the old MP4.
+cp "$DIR/clip_01.mp4" "$DIR/original-copy.mp4"
+code="$(curl -sS -o /dev/null -w '%{http_code}' \
+  -F "clip_file=clip_01.mp4" -F "focus=left" -F "rights_confirmed=true" \
+  "$URL/api/jobs/$id/reframe")"
+test "$code" = "401"
+code="$(curl -sS -H "X-Access-Key: $TOKEN" -o /dev/null -w '%{http_code}' \
+  -F "clip_file=clip_01.mp4" -F "focus=right" -F "rights_confirmed=false" \
+  "$URL/api/jobs/$id/reframe")"
+test "$code" = "400"
+curl -fsS -H "X-Access-Key: $TOKEN" \
+  -F "clip_file=clip_01.mp4" -F "focus=left" -F "rights_confirmed=true" \
+  "$URL/api/jobs/$id/reframe" > "$DIR/reframe.json"
+python - "$DIR/reframe.json" <<'PY'
+import json,sys
+response=json.load(open(sys.argv[1]))
+assert response["status"] == "queued", response
+assert response["file"] == "clip_01_focus_left_01.mp4", response
+PY
+focused=0
+for _ in $(seq 1 90); do
+  curl -fsS -H "X-Access-Key: $TOKEN" "$URL/api/jobs/$id" > "$DIR/status.json"
+  state="$(python - "$DIR/status.json" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1])).get("reframe", {}).get("status", "pending"))
+PY
+)"
+  if [[ "$state" == "ready" ]]; then
+    focused=1
+    break
+  elif [[ "$state" == "failed" ]]; then
+    cat "$DIR/status.json"
+    exit 1
+  fi
+  sleep 2
+done
+test "$focused" = "1"
+curl -fsS -H "X-Access-Key: $TOKEN" \
+  "$URL/api/jobs/$id/files/clip_01.mp4" -o "$DIR/original-after.mp4"
+cmp "$DIR/original-copy.mp4" "$DIR/original-after.mp4"
+curl -fsS -H "X-Access-Key: $TOKEN" \
+  "$URL/api/jobs/$id/files/clip_01_focus_left_01.mp4" -o "$DIR/clip_01_focus_left_01.mp4"
+test -s "$DIR/clip_01_focus_left_01.mp4"
+curl -fsS -H "X-Access-Key: $TOKEN" \
+  "$URL/api/jobs/$id/thumbnails/clip_01_focus_left_01.mp4" \
+  -o "$DIR/clip_focus_thumb.jpg"
+test -s "$DIR/clip_focus_thumb.jpg"
+python - "$DIR/status.json" <<'PY'
+import json,sys
+job=json.load(open(sys.argv[1]))
+assert len(job["clips"]) == 2, job
+assert job["clips"][0]["file"] == "clip_01.mp4"
+assert job["clips"][1]["file"] == "clip_01_focus_left_01.mp4"
+assert job["clips"][1]["technical"]["verified"] is True
+PY
+
 curl -fsS --max-time 40 -H "X-Access-Key: $TOKEN" \
   "$URL/api/jobs/$id/files/shorts_factory_export.zip" -o "$DIR/export.zip"
 test -s "$DIR/export.zip"
@@ -157,12 +213,13 @@ test -s "$DIR/export.zip"
 python - "$DIR/export.zip" "$DIR/status.json" <<'PY'
 import json, sys, zipfile
 job = json.load(open(sys.argv[2]))
-assert len(job["clips"]) == 1, job
+assert len(job["clips"]) == 2, job
 assert job["review"]["monetization_guaranteed"] is False
 assert job["clips"][0]["technical"]["verified"] is True
 assert job["brand_id"] == "bajo-mundo"
 with zipfile.ZipFile(sys.argv[1]) as zipped:
     assert "clip_01.mp4" in zipped.namelist()
+    assert "clip_01_focus_left_01.mp4" in zipped.namelist()
     assert "clips.json" in zipped.namelist()
 print("Authenticated upload, video processing, MP4 download and ZIP export passed.")
 PY
