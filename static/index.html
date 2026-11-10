@@ -7,7 +7,7 @@
   <title>Shorts Factory — AI Clip Studio</title>
   <meta name="description" content="Turn long videos into captioned, branded, vertical Shorts with a private editing studio.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=6">
+  <link rel="stylesheet" href="/style.css?v=7">
 </head>
 <body>
   <div class="app-shell">
@@ -79,12 +79,6 @@
             <div class="project-source"><span class="project-source-icon">▣</span><div><small>YOUR ORIGINAL VIDEO</small><strong id="resultsSource">Source video</strong></div></div>
             <div class="project-meta"><span id="resultsTotal">5 ready-to-post clips</span><span class="project-separator">•</span><span>1080 × 1920 HD</span><span class="project-separator">•</span><span>MP4 exports</span></div>
           </div>
-          <section id="reviewPanel" class="publishing-review" aria-label="Publishing rights and quality review">
-            <div class="review-title"><div><span class="eyebrow">BEFORE YOU PUBLISH</span><h3>Monetization &amp; quality review</h3><p>Technical export checks are automatic. Copyright, originality and account eligibility still require verification.</p></div><strong id="reviewStatus">Review required</strong></div>
-            <div id="reviewFlags" class="review-flags"></div>
-            <div id="clipReview" class="clip-review"></div>
-          </section>
-          <div id="warnings"></div>
           <div class="review-stage">
             <div class="stage-main">
               <div class="stage-media" id="stageMedia">
@@ -100,6 +94,23 @@
                 <div><div class="stage-meta-kicker">NOW PREVIEWING <span id="stagePosition">01 / 05</span></div><h3 id="stageClipTitle">Choose a clip to preview</h3><p id="stageClipDetails">Review the clip before sharing.</p></div>
                 <div class="stage-meta-actions"><button type="button" class="subtle-btn" id="stageCopy">⧉ Copy caption</button><button type="button" class="subtle-btn" id="stageCoverDownload">↓ Save cover JPG</button><button type="button" class="primary-small-btn" id="stageDownload">↓ Download MP4</button></div>
               </div>
+              <div class="reframe-tool" aria-label="Fix clip framing">
+                <div class="reframe-heading">
+                  <div><strong>Fix the split-screen look</strong><small>Create a fresh crop from the saved original. Your existing export stays unchanged.</small></div>
+                  <span>RE-EDIT</span>
+                </div>
+                <div class="reframe-actions">
+                  <label for="reframeFocus">Frame focus</label>
+                  <select id="reframeFocus" aria-label="Choose framing for new clip">
+                    <option value="left">Show left panel</option>
+                    <option value="right">Show right panel</option>
+                    <option value="fill">Fill entire frame</option>
+                  </select>
+                  <button id="reframeBtn" type="button">Create cleaner version</button>
+                </div>
+                <label class="reframe-confirm"><input type="checkbox" id="reframePermission"> I own this footage or have permission to re-edit it.</label>
+                <p id="reframeStatus" role="status">The new crop will keep the audio, captions and selected channel branding. Embedded overlays may still appear.</p>
+              </div>
             </div>
             <aside class="stage-side">
               <div class="stage-side-heading"><span>YOUR CLIP PLAYLIST</span><small id="stageQueueCount">0 clips</small></div>
@@ -109,7 +120,18 @@
           </div>
           <div class="gallery-heading"><div><h3>All clips</h3><p>Choose a thumbnail to watch the actual edit.</p></div><span class="gallery-hint">9:16 · FULL HD</span></div>
           <div class="clips-grid" id="clipsGrid"></div>
-          <div class="monetize-note"><strong>Publishing and monetization</strong><p>Captions, cropping and watermarks do not establish copyright permission. Confirm source, music and visual rights and review each platform's eligibility rules before sharing.</p></div>
+          <details id="reviewPanel" class="publishing-review" aria-label="Publishing rights and quality review">
+            <summary class="review-title">
+              <span class="review-title-text"><strong>Publishing review</strong><small>Technical checks passed where verified. Confirm rights and originality before posting.</small></span>
+              <span id="reviewStatus">Review required</span>
+            </summary>
+            <div class="review-details">
+              <p class="review-explainer">A clean export is not a monetization approval. These are the risks and limitations detected for this project.</p>
+              <div id="reviewFlags" class="review-flags"></div>
+              <div id="clipReview" class="clip-review"></div>
+              <div id="warnings"></div>
+            </div>
+          </details>
         </section>
 
         <div class="editor-heading"><div><span class="eyebrow">CREATE MORE CONTENT</span><h2 id="editorHeadline">Create your first batch</h2></div><span>Upload → customize → generate</span></div>
@@ -200,6 +222,6 @@
   </div>
   <div class="modal-backdrop hidden" id="authModal"><form class="auth-modal" id="authForm"><div class="auth-icon">▶</div><h2>Welcome to your studio</h2><p>Enter the private password configured for your Shorts Factory server.</p><label for="accessPassword">Access password</label><input type="password" id="accessPassword" autocomplete="current-password" placeholder="Your studio password" required><button type="submit" class="generate-button">Unlock studio <span>↗</span></button><span class="auth-error" id="authError"></span></form></div>
   <div class="toast hidden" id="toast" role="status"></div>
-  <script src="/app.js?v=6" defer></script>
+  <script src="/app.js?v=7" defer></script>
 </body>
 </html>

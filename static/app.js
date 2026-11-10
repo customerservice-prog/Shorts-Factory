@@ -18,6 +18,8 @@
   let previewVideoUrl = null;
   let previewRequestNumber = 0;
   let pendingCompletionId = null;
+  let lastDisplayedClipFile = null;
+  let lastReframeSeen = null;
   const thumbs = new Map();
   const pendingThumbs = new Map();
   const pad = (number) => String(number).padStart(2, "0");
@@ -574,6 +576,7 @@
       return;
     }
     const fingerprint = job.id + "/" + (job.clips || []).map(c => c.file).join("|");
+    const previousFile = selectedJobId === job.id ? lastDisplayedClipFile : null;
     selectedJobId = job.id;
     if (renderedResultsKey === fingerprint && !$("results").classList.contains("hidden")) return;
     renderedResultsKey = fingerprint;
@@ -591,7 +594,15 @@
     $("clipQueue").innerHTML = (job.clips || []).map((clip,i) => buildQueueItem(job,clip,i)).join("");
     hydrateThumbnails($("clipsGrid"));
     hydrateThumbnails($("clipQueue"));
-    selectClip(0, false);
+    let nextIndex = previousFile ? (job.clips || []).findIndex(c => c.file === previousFile) : 0;
+    if (job.reframe?.status === "ready" && job.reframe.file &&
+        lastReframeSeen !== job.id + "/" + job.reframe.file) {
+      nextIndex = (job.clips || []).findIndex(c => c.file === job.reframe.file);
+      lastReframeSeen = job.id + "/" + job.reframe.file;
+      toast("Your cleaner, reframed version is ready. The old clip is still available.");
+    }
+    selectClip(Math.max(0, nextIndex), false);
+    updateReframeStatus(job);
     $("activePanel").classList.add("hidden");
   }
 
@@ -602,6 +613,7 @@
     selectedClipIndex = index;
     renderSelectedReview(job);
     const clip = job.clips[index];
+    lastDisplayedClipFile = clip.file;
     const total = job.clips.length;
     $("stageNumber").textContent = "CLIP " + pad(index + 1);
     $("stageDuration").textContent = clock(clip.length);
@@ -667,7 +679,10 @@
       if (working) activeJobId = working.id;
       if (activeJobId) renderProgress(jobs.find(j => j.id === activeJobId));
       const selected = jobs.find(j => j.id === selectedJobId);
-      if (selected?.status === "completed") renderResults(selected);
+      if (selected?.status === "completed") {
+        renderResults(selected);
+        updateReframeStatus(selected);
+      }
       else if (!selectedJobId || !selected) {
         const latest = jobs.find(j => j.status === "completed");
         if (latest) renderResults(latest);
@@ -739,6 +754,50 @@
     } catch (error) { toast(error.message); }
   }
 
+
+  function updateReframeStatus(job) {
+    const status = $("reframeStatus");
+    const button = $("reframeBtn");
+    if (!status || !button) return;
+    const task = job?.reframe;
+    const busy = task?.status === "queued" || task?.status === "rendering";
+    button.disabled = busy;
+    button.textContent = busy ? "Creating new clip…" : "Create cleaner version";
+    status.textContent = busy ?
+      "Generating " + task.focus + " focus from your saved original. You can leave this page; the new clip will appear here." :
+      task?.status === "failed" ? (task.error || "Could not create the reframed clip.") :
+      task?.status === "ready" ? "Latest version saved: " + task.file +
+        ". Your old clip was not changed. Check the new composition before publishing." :
+      "Choose left/right for a split-screen source. Embedded channel marks, captions or audio remain unless you have rights and edit them separately.";
+  }
+
+  async function createFocusedVersion() {
+    const job = jobs.find(j => j.id === selectedJobId);
+    const clip = job?.clips?.[selectedClipIndex];
+    if (!job || !clip) return toast("Select an existing clip first.");
+    if (!$("reframePermission").checked) return toast("Please confirm you have permission to re-edit the source footage.");
+    if (!["left", "right", "fill"].includes($("reframeFocus").value)) return;
+    const old = clip.source_clip || clip.file;
+    const data = new FormData();
+    data.append("clip_file", old);
+    data.append("focus", $("reframeFocus").value);
+    data.append("rights_confirmed", "true");
+    $("reframeBtn").disabled = true;
+    $("reframeStatus").textContent = "Submitting your focused edit…";
+    try {
+      const response = await api("/api/jobs/" + encodeURIComponent(job.id) + "/reframe",
+                                 {method:"POST", body:data});
+      const queued = await response.json();
+      $("reframeStatus").textContent = "Creating " + queued.file + ". Your original clip is safe.";
+      toast("Reframing started. Watch for your new Short in the playlist.");
+      await refreshJobs();
+    } catch (error) {
+      $("reframeStatus").textContent = error.message;
+      toast("Reframe error: " + error.message);
+      $("reframeBtn").disabled = false;
+    }
+  }
+
   function setupActions() {
     document.addEventListener("click", async (event) => {
       const selectedButton = event.target.closest("[data-select]");
@@ -773,6 +832,7 @@
       if (job && job.zip_file) download(job.id, job.zip_file);
     });
     $("stagePlay").addEventListener("click", playSelectedClip);
+    $("reframeBtn").addEventListener("click", createFocusedVersion);
     $("stageDownload").addEventListener("click", () => {
       const job = jobs.find(j => j.id === selectedJobId);
       const clip = job?.clips?.[selectedClipIndex];
