@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 import threading
 import time
 import uuid
@@ -14,6 +15,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from pipeline import make_shorts, generate_thumbnail
+from branding import BRAND_DIR, PROFILE_ID, brand_path, list_brands, save_brand
+from review import PLATFORMS, AUDIO_RIGHTS, ORIGINALITY
 
 BASE = Path(os.getenv("DATA_DIR", "./data")).resolve()
 BASE.mkdir(parents=True, exist_ok=True)
@@ -120,7 +123,7 @@ def process(job_id: str):
         update_job(job_id, progress=100, status="completed",
                    note="Your shorts are ready.", clips=result["clips"],
                    warnings=result["warnings"], transcript=result["transcript"],
-                   zip_file=result["zip_file"])
+                   zip_file=result["zip_file"], review=result["review"])
     except Exception as exc:
         update_job(job_id, status="failed", note=str(exc)[:500], progress=0)
 
@@ -137,6 +140,44 @@ def config():
             "needs_setup": HOSTED and not bool(PASSWORD),
             "max_upload_mb": MAX_UPLOAD // 1024 // 1024,
             "engine": "Local Whisper + FFmpeg"}
+
+
+@app.get("/api/brands")
+def get_brands(x_access_key: str | None = Header(default=None)):
+    protect(x_access_key)
+    return {"brands": list_brands(), "default": "bajo-mundo"}
+
+
+@app.get("/api/brands/{brand_id}/logo")
+def brand_logo(brand_id: str, x_access_key: str | None = Header(default=None)):
+    protect(x_access_key)
+    try:
+        path = brand_path(brand_id)
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(404, "Channel logo not available") from exc
+    if not path:
+        raise HTTPException(404, "No logo for this channel")
+    return FileResponse(path, media_type="image/png",
+                        headers={"Cache-Control": "private, max-age=1800",
+                                 "X-Content-Type-Options": "nosniff"})
+
+
+@app.post("/api/brands", status_code=201)
+async def create_brand_profile(
+    name: str = Form(...), logo: UploadFile = File(...),
+    x_access_key: str | None = Header(default=None),
+):
+    protect(x_access_key)
+    extension = Path(logo.filename or "").suffix.lower()
+    if extension not in ALLOWED_LOGOS:
+        raise HTTPException(400, "Upload a PNG, WEBP, JPG or JPEG channel logo.")
+    with tempfile.TemporaryDirectory(dir=str(BASE)) as temporary:
+        source = Path(temporary) / ("brand" + extension)
+        await save_upload(logo, source, 8 * 1024 * 1024)
+        try:
+            return save_brand(name, source)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
 
 @app.get("/api/jobs")
@@ -189,23 +230,45 @@ async def create_job(
     logo: UploadFile | None = File(default=None),
     clip_count: int = Form(default=5),
     clip_length: int = Form(default=45),
-    layout: str = Form(default="blur"),
+    layout: str = Form(default="fill"),
     captions: str = Form(default="pop"),
     brand_name: str = Form(default=""),
+    brand_id: str = Form(default="bajo-mundo"),
+    cover_old_brand: str = Form(default="none"),
     rights: str = Form(default="unknown"),
+    audio_rights: str = Form(default="unknown"),
+    originality: str = Form(default="unknown"),
+    target_platform: str = Form(default="youtube_shorts"),
+    rights_evidence: str = Form(default=""),
     x_access_key: str | None = Header(default=None),
 ):
     protect(x_access_key)
     if clip_count not in range(1, 11):
         raise HTTPException(400, "Choose 1 to 10 clips.")
-    if clip_length not in (20, 30, 45, 60):
+    if clip_length not in (20, 30, 45, 60, 90):
         raise HTTPException(400, "Unsupported clip length.")
-    if layout not in ("blur", "fill"):
+    if layout not in ("blur", "fill", "left", "right"):
         raise HTTPException(400, "Unsupported video layout.")
     if captions not in ("pop", "classic", "none"):
         raise HTTPException(400, "Unsupported caption style.")
     if rights not in ("owned", "licensed", "commentary", "unknown"):
         raise HTTPException(400, "Unsupported source-rights selection.")
+    if audio_rights not in AUDIO_RIGHTS or originality not in ORIGINALITY or target_platform not in PLATFORMS:
+        raise HTTPException(400, "Unsupported rights or platform review settings.")
+    if cover_old_brand not in ("none", "top_left", "top_right", "bottom_left", "bottom_right"):
+        raise HTTPException(400, "Unsupported previous logo location.")
+    if cover_old_brand != "none" and rights not in ("owned", "licensed"):
+        raise HTTPException(400, "Replacing previous branding requires rights to this footage.")
+    if len(rights_evidence) > 500:
+        raise HTTPException(400, "The rights reference is too long.")
+    if target_platform == "tiktok_rewards" and clip_length < 90:
+        clip_length = 90  # Automatic target to exceed the 60-second threshold.
+    try:
+        selected_logo = brand_path(brand_id)
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise HTTPException(400, "Channel brand unavailable. Choose another logo.") from exc
+    selected_channel = next((brand["name"] for brand in list_brands()
+                             if brand["id"] == brand_id), "Custom channel")
     suffix = Path(video.filename or "").suffix.lower()
     if suffix not in ALLOWED_VIDEOS:
         raise HTTPException(400, "Please upload an MP4, MOV, MKV, WEBM or M4V video.")
@@ -219,7 +282,7 @@ async def create_job(
     try:
         source_path = directory / ("source" + suffix)
         await save_upload(video, source_path, MAX_UPLOAD)
-        logo_path = None
+        logo_path = selected_logo
         if logo and logo_suffix:
             logo_path = directory / ("brand" + logo_suffix)
             await save_upload(logo, logo_path, 8 * 1024 * 1024)
@@ -230,7 +293,13 @@ async def create_job(
             "clip_count": clip_count, "clip_length": clip_length, "layout": layout,
             "captions": captions, "brand_name": brand_name.strip()[:55],
             "rights": rights, "source": str(source_path),
-            "logo": str(logo_path) if logo_path else None, "clips": [],
+            "logo": str(logo_path) if logo_path else None,
+            "brand_id": brand_id if not (logo and logo_suffix) else "custom-upload",
+            "cover_old_brand": cover_old_brand,
+            "channel_name": selected_channel if not (logo and logo_suffix) else "Uploaded channel logo",
+            "audio_rights": audio_rights, "originality": originality,
+            "target_platform": target_platform, "rights_evidence": rights_evidence.strip(),
+            "review": None, "clips": [],
             "warnings": [], "zip_file": None, "transcript": "",
         }
         save_job(job)

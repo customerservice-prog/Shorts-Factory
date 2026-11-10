@@ -7,7 +7,7 @@
   <title>Shorts Factory — AI Clip Studio</title>
   <meta name="description" content="Turn long videos into captioned, branded, vertical Shorts with a private editing studio.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=4">
+  <link rel="stylesheet" href="/style.css?v=5">
 </head>
 <body>
   <div class="app-shell">
@@ -79,6 +79,11 @@
             <div class="project-source"><span class="project-source-icon">▣</span><div><small>YOUR ORIGINAL VIDEO</small><strong id="resultsSource">Source video</strong></div></div>
             <div class="project-meta"><span id="resultsTotal">5 ready-to-post clips</span><span class="project-separator">•</span><span>1080 × 1920 HD</span><span class="project-separator">•</span><span>MP4 exports</span></div>
           </div>
+          <section id="reviewPanel" class="publishing-review" aria-label="Publishing rights and quality review">
+            <div class="review-title"><div><span class="eyebrow">BEFORE YOU PUBLISH</span><h3>Monetization &amp; quality review</h3><p>Technical export checks are automatic. Copyright, originality and account eligibility still require verification.</p></div><strong id="reviewStatus">Review required</strong></div>
+            <div id="reviewFlags" class="review-flags"></div>
+            <div id="clipReview" class="clip-review"></div>
+          </section>
           <div id="warnings"></div>
           <div class="review-stage">
             <div class="stage-main">
@@ -147,15 +152,32 @@
           <section class="panel settings-panel">
             <div class="section-top"><div><span class="section-number step-circle">3</span><div><h2>Make it yours</h2><p class="section-description">Customize your finished clips</p></div></div><span class="soft-tag purple">AUTO EDIT</span></div>
             <div class="setting"><div class="setting-title"><label for="clipCount">How many clips?</label><strong id="clipCountText">5 clips</strong></div><input id="clipCount" type="range" min="1" max="10" value="5"><div class="slider-labels"><span>1 clip</span><span>10 clips</span></div></div>
-            <div class="setting"><label for="clipLength">Target clip duration</label><div class="select-wrap"><select id="clipLength"><option value="20">20 seconds — quick</option><option value="30">30 seconds — punchy</option><option value="45" selected>45 seconds — balanced</option><option value="60">60 seconds — story</option></select></div></div>
+            <div class="setting"><label for="clipLength">Target clip duration</label><div class="select-wrap"><select id="clipLength"><option value="20">20 seconds — quick</option><option value="30">30 seconds — punchy</option><option value="45" selected>45 seconds — balanced</option><option value="60">60 seconds — story</option><option value="90">90 seconds — TikTok Rewards target</option></select></div></div>
             <div class="setting"><label for="captions">Caption animation</label><div class="select-wrap"><select id="captions"><option value="pop" selected>Pop — animated word highlights</option><option value="classic">Classic — clean subtitles</option><option value="none">No captions</option></select></div></div>
-            <div class="setting"><label>Video framing</label><div class="choice-row" id="layoutGroup"><button type="button" class="choice active" data-layout="blur"><span class="layout-icon">▣</span><strong>Keep full frame</strong><small>Blurred background</small></button><button type="button" class="choice" data-layout="fill"><span class="layout-icon">▯</span><strong>Fill the screen</strong><small>Center cropped</small></button></div></div>
+            <div class="setting"><label>Video framing</label><div class="choice-row" id="layoutGroup"><button type="button" class="choice active" data-layout="fill"><span class="layout-icon">▯</span><strong>Fill screen</strong><small>Center cropped</small></button><button type="button" class="choice" data-layout="blur"><span class="layout-icon">▣</span><strong>Full scene</strong><small>Soft background</small></button><button type="button" class="choice" data-layout="left"><span class="layout-icon">◧</span><strong>Focus left</strong><small>For split video</small></button><button type="button" class="choice" data-layout="right"><span class="layout-icon">◨</span><strong>Focus right</strong><small>For split video</small></button></div><p class="framing-help">Split-screen source? Pick left or right to choose a focus area. Preview the finished export before posting.</p></div>
             <div class="option-heading branding-header"><span class="brand-label-icon">✦</span><h2>Your branding</h2><span class="subtle-optional">Optional</span></div>
-            <div class="branding-row">
-              <div class="brand-upload"><input type="file" id="logoFile" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" hidden><button type="button" class="logo-pick" id="logoPick" aria-label="Choose a logo"><span id="logoSymbol">＋</span></button><div><strong>Upload logo</strong><span id="logoLabel">PNG, JPG or WEBP</span></div></div>
-              <div class="brand-text"><label for="brandName">Text watermark</label><input type="text" id="brandName" maxlength="55" placeholder="@yourpage"></div>
+            <div class="channel-branding">
+              <label for="brandProfile">Channel profile</label>
+              <div class="select-wrap"><select id="brandProfile"><option value="bajo-mundo" selected>Bajo Mundo TV · default logo</option><option value="none">No logo</option><option value="new">+ Add another channel</option></select></div>
+              <div class="brand-preview-card"><div class="brand-preview-thumb"><img id="brandPreviewImg" alt="Selected channel logo" hidden><span id="brandPreviewFallback">TV</span></div><div><strong id="brandPreviewName">Bajo Mundo TV</strong><small id="brandPreviewDescription">Automatically placed on new exports</small></div></div>
+              <div id="newBrandControls" class="new-brand-controls hidden">
+                <label for="newChannelName">New channel name</label>
+                <input id="newChannelName" type="text" maxlength="55" placeholder="Channel or page name">
+                <div class="brand-upload"><input type="file" id="logoFile" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" hidden><button type="button" class="logo-pick" id="logoPick" aria-label="Choose a logo"><span id="logoSymbol">＋</span></button><div><strong>Upload channel logo</strong><span id="logoLabel">Transparent PNG recommended</span></div></div>
+                <button type="button" id="saveBrandBtn" class="save-brand-btn">Save channel &amp; logo</button>
+              </div>
+              <div class="old-brand-control"><label for="coverOldBrand">Replace a previous corner logo (authorized footage only)</label><div class="select-wrap"><select id="coverOldBrand"><option value="none">Leave existing video unchanged</option><option value="top_left">Blur old logo · top left</option><option value="top_right">Blur old logo · top right</option><option value="bottom_left">Blur old logo · bottom left</option><option value="bottom_right">Blur old logo · bottom right</option></select></div><p class="framing-help">Covers a 320 × 195-pixel corner of the final export. Check that the result looks clean. Does not grant permission to republish another creator's footage.</p></div>
+              <div class="brand-text"><label for="brandName">Optional text watermark (when no logo)</label><input type="text" id="brandName" maxlength="55" placeholder="@yourpage"></div>
             </div>
-            <div class="setting rights-setting"><label for="rights">Source rights</label><div class="select-wrap"><select id="rights"><option value="unknown">I need to check</option><option value="owned">I own this content</option><option value="licensed">I have permission or a license</option><option value="commentary">Commentary / criticism</option></select></div><small>Editing or adding a logo doesn't automatically permit reposting or monetization.</small></div>
+            <section class="rights-audit">
+              <div class="audit-heading"><strong>Before you publish</strong><small>Rights, originality &amp; platform checks</small></div>
+              <div class="setting rights-setting"><label for="targetPlatform">Target platform</label><div class="select-wrap"><select id="targetPlatform"><option value="facebook_reels">Facebook Reels</option><option value="instagram_reels">Instagram Reels</option><option value="youtube_shorts">YouTube Shorts</option><option value="tiktok_rewards">TikTok Creator Rewards</option><option value="other">Other / personal export</option></select></div></div>
+              <div class="setting rights-setting"><label for="rights">Source footage rights</label><div class="select-wrap"><select id="rights"><option value="unknown">Not verified</option><option value="owned">I created/own the footage</option><option value="licensed">I have commercial editing rights</option><option value="commentary">Commentary / criticism (requires review)</option></select></div></div>
+              <div class="setting rights-setting"><label for="audioRights">Music &amp; sound recording rights</label><div class="select-wrap"><select id="audioRights"><option value="unknown">Not verified</option><option value="owned">I own all audio</option><option value="licensed">Commercial music rights obtained</option><option value="no_music">No third-party music/audio</option></select></div></div>
+              <div class="setting rights-setting"><label for="originality">What original value was added?</label><div class="select-wrap"><select id="originality"><option value="unknown">Not verified</option><option value="original">I created the original video</option><option value="substantial_commentary">Substantial original analysis/commentary</option><option value="minimal">Only cropping, captions or branding</option></select></div></div>
+              <div class="setting rights-setting"><label for="rightsEvidence">Permission or license reference</label><input id="rightsEvidence" maxlength="500" placeholder="Optional: where you keep the agreement"></div>
+              <p class="rights-disclaimer">Your answers are self-reported. A channel logo, subtitles or new crop do not by themselves make another artist's video monetizable.</p>
+            </section>
             <div class="generate-area">
               <div class="output-summary"><span>YOUR EXPORT</span><strong id="outputSummary">5 vertical clips · ~45s each</strong><small>Actual cuts can be shorter depending on the source.</small></div>
               <button class="generate-button" id="generateBtn" type="submit" disabled><span>✦</span> <span id="generateText">Choose a video to start</span><span class="generate-arrow">↗</span></button>
@@ -173,6 +195,6 @@
   </div>
   <div class="modal-backdrop hidden" id="authModal"><form class="auth-modal" id="authForm"><div class="auth-icon">▶</div><h2>Welcome to your studio</h2><p>Enter the private password configured for your Shorts Factory server.</p><label for="accessPassword">Access password</label><input type="password" id="accessPassword" autocomplete="current-password" placeholder="Your studio password" required><button type="submit" class="generate-button">Unlock studio <span>↗</span></button><span class="auth-error" id="authError"></span></form></div>
   <div class="toast hidden" id="toast" role="status"></div>
-  <script src="/app.js?v=3" defer></script>
+  <script src="/app.js?v=5" defer></script>
 </body>
 </html>

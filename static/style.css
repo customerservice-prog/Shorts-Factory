@@ -290,3 +290,39 @@ body.has-results .studio-hero{display:none}
 @media(max-width:1200px){.review-stage{grid-template-columns:minmax(0,1fr) 275px}.stage-media{min-height:430px;height:560px}}
 @media(max-width:1050px){.review-stage{grid-template-columns:1fr}.stage-media{height:min(65vh,630px)}.clip-queue{flex-direction:row;overflow-x:auto}.review-studio .clips-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:650px){.review-studio{padding:13px}.stage-media{height:470px;min-height:0}.featured-poster,.featured-video{max-width:100%}.review-studio .clips-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.stage-meta-actions{flex-wrap:wrap}.stage-meta-actions button{flex:1 1 130px}}
+
+/* V5: Channel profiles and publishing-risk review */
+.channel-branding,.rights-audit{background:#0d141c;border:1px solid #33424d;border-radius:15px;padding:17px;margin-top:14px}
+.channel-branding>label{display:block;font-size:12px;font-weight:800;margin-bottom:10px}
+.brand-preview-card{display:flex;align-items:center;gap:14px;background:#141f2b;border:1px solid #2d4253;border-radius:12px;padding:12px;margin:13px 0}
+.brand-preview-thumb{height:72px;width:87px;border-radius:10px;display:grid;place-items:center;flex-shrink:0;background:linear-gradient(145deg,#24292e,#0b1018);overflow:hidden}
+.brand-preview-thumb img{max-width:100%;max-height:100%;object-fit:contain}
+.brand-preview-thumb span{font-size:21px;font-weight:950;color:var(--lime)}
+.brand-preview-card strong,.brand-preview-card small{display:block}
+.brand-preview-card strong{font-size:14px}
+.brand-preview-card small{font-size:11px;color:#a3b5bf;line-height:1.5;margin-top:5px}
+.new-brand-controls{padding:13px;border:1px dashed #526379;border-radius:12px;margin:14px 0;display:grid;gap:12px}
+.new-brand-controls>label{font-size:12px;font-weight:700}
+.new-brand-controls>input{background:#111924;color:#fff;border:1px solid #3c5060;padding:12px;border-radius:9px;width:100%}
+.save-brand-btn{background:var(--lime);color:#11180d;font-weight:850;border:0;border-radius:10px;padding:12px;cursor:pointer}
+.channel-branding .brand-text{width:100%;margin-top:15px}
+.channel-branding .brand-text input{width:100%;max-width:100%}
+.framing-help,.rights-disclaimer{font-size:11px;line-height:1.6;color:#a1adb9;margin:10px 0 0}
+.audit-heading{margin-bottom:15px;display:flex;flex-direction:column;gap:4px}
+.audit-heading strong{font-size:15px}.audit-heading small{color:#a1abb5;font-size:11px}
+.rights-audit .setting{margin:13px 0}.rights-audit .setting:last-of-type{margin-bottom:3px}
+.rights-audit input{width:100%;min-width:0;background:#111924;color:#fff;border:1px solid #415368;padding:12px;border-radius:9px}
+.choice-row{flex-wrap:wrap}.choice-row .choice{min-width:calc(50% - 6px);flex:1 1 calc(50% - 6px)}
+.publishing-review{margin:8px 0 20px;background:#111a24;border:1px solid #3a485a;border-radius:15px;padding:20px}
+.review-title{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:16px}
+.review-title h3{margin:8px 0;font-size:21px}.review-title p{margin:0;color:#a8b7c4;font-size:12px;line-height:1.55}
+.review-title>strong{background:#483624;color:#ffd5a0;border:1px solid #715131;padding:9px 12px;border-radius:8px;font-size:11px;white-space:nowrap}
+.review-flags{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+.review-flag{border:1px solid #394757;background:#17212c;border-radius:10px;padding:12px;min-width:0}
+.review-flag strong{font-size:12px;color:#ecf2f7;display:block;margin-bottom:5px}
+.review-flag p{font-size:11px;color:#acbdc8;line-height:1.55;margin:0}
+.review-flag.high{border-left:3px solid #fb815f}.review-flag.review{border-left:3px solid #f1c364}.review-flag.unverified{border-left:3px solid #93a9ce}
+.clip-review{padding-top:15px;margin-top:15px;border-top:1px solid #354450}
+.clip-review h4{font-size:13px;margin:0 0 10px}.clip-review p{font-size:11px;color:#adb9c7;line-height:1.55}
+.clip-review ul{margin:10px 0 0;padding-left:20px;font-size:11px;line-height:1.65;color:#bfcbd4}
+@media(max-width:710px){.review-flags{grid-template-columns:1fr}.review-title{align-items:flex-start;flex-wrap:wrap}.publishing-review{padding:14px}}

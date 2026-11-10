@@ -10,6 +10,7 @@ import subprocess
 import threading
 import zipfile
 from pathlib import Path
+from review import inspect_export, risk_review
 
 _MODEL = None
 _MODEL_LOCK = threading.Lock()
@@ -254,15 +255,17 @@ def write_captions(path: Path, words, start: float, end: float, mode: str):
     return True
 
 
-def render_clip(source, destination, start, end, layout, captions_file, brand, logo, audio):
+def render_clip(source, destination, start, end, layout, captions_file, brand, logo, audio, cover_old_brand="none"):
     args = ["ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
             "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", str(source)]
     if logo:
         args.extend(["-i", str(logo)])
     filters = []
-    if layout == "fill":
+    if layout in ("fill", "left", "right"):
+        horizontal = {"fill": "(iw-1080)/2", "left": "(iw-1080)/8",
+                      "right": "(iw-1080)*7/8"}[layout]
         filters.append("[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-                       "crop=1080:1920,setsar=1[canvas]")
+                       f"crop=1080:1920:{horizontal}:(ih-1920)/2,setsar=1[canvas]")
     else:
         filters.append("[0:v]split=2[bg][fg]")
         filters.append("[bg]scale=540:960:force_original_aspect_ratio=increase,"
@@ -271,9 +274,27 @@ def render_clip(source, destination, start, end, layout, captions_file, brand, l
                        "setsar=1[front]")
         filters.append("[back][front]overlay=(W-w)/2:(H-h)/2[canvas]")
     current = "canvas"
+    if cover_old_brand != "none":
+        # Blur a small selected corner for footage the user is authorized to rebrand.
+        # No attempt at identifying third-party marks or bypassing rights controls.
+        positions = {
+            "top_left": ("0", "0"),
+            "top_right": ("iw-320", "0"),
+            "bottom_left": ("0", "ih-195"),
+            "bottom_right": ("iw-320", "ih-195"),
+        }
+        if cover_old_brand not in positions:
+            raise ValueError("Unsupported old brand area")
+        px, py = positions[cover_old_brand]
+        ox = px.replace("iw", "W")
+        oy = py.replace("ih", "H")
+        filters.append(f"[{current}]split=2[coverbase][coverpatch]")
+        filters.append(f"[coverpatch]crop=320:195:{px}:{py},boxblur=24:1[masked]")
+        filters.append(f"[coverbase][masked]overlay={ox}:{oy}[covered]")
+        current = "covered"
     if logo:
-        filters.append("[1:v]scale=175:-2[logomark]")
-        filters.append(f"[{current}][logomark]overlay=W-w-65:85:eof_action=repeat[branded]")
+        filters.append("[1:v]format=rgba,scale=240:-2[logomark]")
+        filters.append(f"[{current}][logomark]overlay=W-w-38:45:eof_action=repeat[branded]")
         current = "branded"
     elif brand:
         brand_path = destination.parent / "brand_text.txt"
@@ -361,15 +382,23 @@ def make_shorts(job: dict, directory: Path, progress):
                  "rendering", f"Rendering vertical clip {index} of {len(candidates)}...")
         render_clip(source, destination, selected["start"], selected["end"],
                     job["layout"], caption_file if has_captions else None,
-                    job["brand_name"], logo, has_audio)
+                    job["brand_name"], logo, has_audio,
+                    job.get("cover_old_brand", "none"))
+        technical = inspect_export(destination, selected["end"] - selected["start"], has_audio)
         clips.append({
+            "technical": technical,
             "file": output_name, "title": clip_title(selected["words"], index),
             "start": selected["start"], "end": selected["end"],
             "length": round(selected["end"] - selected["start"], 1),
             "highlight_score": max(0, min(100, round(selected["score"]))),
             "captions": has_captions, "layout": job["layout"],
         })
-    progress(96, "rendering", "Packaging all finished shorts...")
+    progress(96, "rendering", "Reviewing export quality and publishing risks...")
+    review = risk_review(job, clips, words, lang, duration, has_audio)
+    for clip, report in zip(clips, review["clip_reviews"]):
+        clip["review"] = report
+    warnings.append("Monetization is NOT certified: review rights, music, originality and platform eligibility before publishing.")
+    progress(97, "rendering", "Packaging verified technical exports...")
     zip_name = "shorts_factory_export.zip"
     with zipfile.ZipFile(out_dir / zip_name, "w", zipfile.ZIP_DEFLATED,
                          compresslevel=1) as bundle:
@@ -377,9 +406,11 @@ def make_shorts(job: dict, directory: Path, progress):
             bundle.write(out_dir / clip["file"], arcname=clip["file"])
         bundle.writestr("clips.json", json.dumps({
             "source": job["filename"], "rights_selected": job["rights"],
-            "clips": clips, "warnings": warnings,
+            "channel": job.get("channel_name"), "brand_id": job.get("brand_id"),
+            "previous_brand_cover": job.get("cover_old_brand", "none"),
+            "clips": clips, "warnings": warnings, "review": review,
             "note": "Export does not establish copyright clearance or monetization eligibility.",
         }, indent=2))
     transcript = " ".join(w["text"] for w in words)
-    return {"clips": clips, "warnings": warnings, "zip_file": zip_name,
+    return {"clips": clips, "warnings": warnings, "review": review, "zip_file": zip_name,
             "transcript": transcript[:20000]}
