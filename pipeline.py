@@ -261,11 +261,17 @@ def render_clip(source, destination, start, end, layout, captions_file, brand, l
     if logo:
         args.extend(["-i", str(logo)])
     filters = []
-    if layout in ("fill", "left", "right"):
-        horizontal = {"fill": "(iw-1080)/2", "left": "(iw-1080)/8",
-                      "right": "(iw-1080)*7/8"}[layout]
+    if layout == "fill":
         filters.append("[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-                       f"crop=1080:1920:{horizontal}:(ih-1920)/2,setsar=1[canvas]")
+                       "crop=1080:1920,setsar=1[canvas]")
+    elif layout in ("left", "right"):
+        # First isolate the chosen half of the ORIGINAL frame, including vertical
+        # side-by-side edits. Merely shifting a 1080px crop did nothing on
+        # existing 9:16 split-screen footage.
+        x_pos = "0" if layout == "left" else "iw/2"
+        filters.append(f"[0:v]crop=iw/2:ih:{x_pos}:0,"
+                       "scale=1080:1920:force_original_aspect_ratio=increase,"
+                       "crop=1080:1920,setsar=1[canvas]")
     else:
         filters.append("[0:v]split=2[bg][fg]")
         filters.append("[bg]scale=540:960:force_original_aspect_ratio=increase,"

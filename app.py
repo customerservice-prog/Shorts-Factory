@@ -102,7 +102,15 @@ def iter_job_folders(newest_first: bool = False) -> list[Path]:
 
 
 def cleanup_old_jobs():
-    age_limit = int(os.getenv("JOB_TTL_HOURS", "48")) * 3600
+    # Existing Railway services may still define JOB_TTL_HOURS=48.
+    # NEVER delete finished projects on that setting alone.
+    # Automatic cleanup requires a separate, explicit, opt-in switch.
+    if os.getenv("AUTODELETE_FINISHED_JOBS", "false").lower() not in ("true", "1"):
+        return
+    ttl_hours = int(os.getenv("JOB_TTL_HOURS", "0"))
+    if ttl_hours <= 0:
+        return
+    age_limit = ttl_hours * 3600
     for folder in iter_job_folders():
         try:
             job = json.loads((folder / "job.json").read_text(encoding="utf-8"))

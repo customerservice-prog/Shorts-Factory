@@ -57,5 +57,33 @@ class ExportIntegrationTests(unittest.TestCase):
             self.assertEqual((data["width"],data["height"]),(1080,1920))
 
 
+    def test_left_and_right_focus_actually_select_different_halves(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "split.mp4"
+            left = root / "left.mp4"
+            right = root / "right.mp4"
+            # 9:16 split video: red left panel, blue right panel.
+            subprocess.run([
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "color=c=red:s=270x960:r=12:d=3.5",
+                "-f", "lavfi", "-i", "color=c=blue:s=270x960:r=12:d=3.5",
+                "-filter_complex", "[0:v][1:v]hstack=inputs=2[v]",
+                "-map", "[v]", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)
+            ], check=True, capture_output=True, timeout=70)
+            render_clip(source,left,0,3,"left",None,"",None,False)
+            render_clip(source,right,0,3,"right",None,"",None,False)
+            def center_pixel(path):
+                raw=subprocess.run([
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-ss", "1",
+                    "-i", str(path), "-vf", "crop=2:2:540:960,format=rgb24",
+                    "-frames:v", "1", "-f", "rawvideo", "pipe:1"
+                ], check=True, capture_output=True, timeout=35).stdout
+                return tuple(raw[:3])
+            l,r=center_pixel(left),center_pixel(right)
+            self.assertGreater(l[0],l[2]+60, (l,r))
+            self.assertGreater(r[2],r[0]+60, (l,r))
+
+
 if __name__ == "__main__":
     unittest.main()

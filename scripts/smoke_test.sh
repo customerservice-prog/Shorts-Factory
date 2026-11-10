@@ -16,7 +16,7 @@ cleanup() {
 trap cleanup EXIT
 
 docker run -d --name "$NAME" -p 127.0.0.1:18781:8080 \
-  -e APP_PASSWORD="$TOKEN" -e WHISPER_MODEL=tiny \
+  -e APP_PASSWORD="$TOKEN" -e WHISPER_MODEL=tiny -e JOB_TTL_HOURS=48 \
   -v "$VOLUME":/data shorts-factory-test >/dev/null
 
 ready=0
@@ -66,6 +66,23 @@ python - "$DIR/jobs-before.json" <<'PY'
 import json, sys
 assert json.load(open(sys.argv[1])) == {"jobs": []}
 PY
+
+# Verify completed projects are kept by default even when housekeeping runs.
+docker exec "$NAME" python -c '
+import os, time, uuid
+from pathlib import Path
+import app
+name = uuid.uuid4().hex[:20]
+folder = app.BASE / name
+folder.mkdir()
+(folder / "job.json").write_text("{\"status\":\"completed\"}")
+old = time.time() - 10 * 86400
+os.utime(folder, (old, old))
+app.cleanup_old_jobs()
+assert folder.exists(), "Default retention must not remove saved exports"
+(folder / "job.json").unlink()
+folder.rmdir()
+'
 
 # Generate an entirely synthetic test clip; no copyrighted source material.
 docker exec "$NAME" ffmpeg -hide_banner -loglevel error -y \

@@ -7,7 +7,7 @@
   <title>Shorts Factory — AI Clip Studio</title>
   <meta name="description" content="Turn long videos into captioned, branded, vertical Shorts with a private editing studio.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=5">
+  <link rel="stylesheet" href="/style.css?v=6">
 </head>
 <body>
   <div class="app-shell">
@@ -178,6 +178,11 @@
               <div class="setting rights-setting"><label for="rightsEvidence">Permission or license reference</label><input id="rightsEvidence" maxlength="500" placeholder="Optional: where you keep the agreement"></div>
               <p class="rights-disclaimer">Your answers are self-reported. A channel logo, subtitles or new crop do not by themselves make another artist's video monetizable.</p>
             </section>
+            <div id="preflightPanel" class="preflight-panel" role="status" aria-live="polite">
+              <div class="preflight-heading"><strong>Before the render</strong><span id="preflightState">Choose a video</span></div>
+              <div id="preflightChecks" class="preflight-checks">We will inspect the source format and your publishing selections before processing.</div>
+              <small>Technical checks are automatic. Rights and monetization still require independent verification.</small>
+            </div>
             <div class="generate-area">
               <div class="output-summary"><span>YOUR EXPORT</span><strong id="outputSummary">5 vertical clips · ~45s each</strong><small>Actual cuts can be shorter depending on the source.</small></div>
               <button class="generate-button" id="generateBtn" type="submit" disabled><span>✦</span> <span id="generateText">Choose a video to start</span><span class="generate-arrow">↗</span></button>
@@ -195,6 +200,6 @@
   </div>
   <div class="modal-backdrop hidden" id="authModal"><form class="auth-modal" id="authForm"><div class="auth-icon">▶</div><h2>Welcome to your studio</h2><p>Enter the private password configured for your Shorts Factory server.</p><label for="accessPassword">Access password</label><input type="password" id="accessPassword" autocomplete="current-password" placeholder="Your studio password" required><button type="submit" class="generate-button">Unlock studio <span>↗</span></button><span class="auth-error" id="authError"></span></form></div>
   <div class="toast hidden" id="toast" role="status"></div>
-  <script src="/app.js?v=5" defer></script>
+  <script src="/app.js?v=6" defer></script>
 </body>
 </html>
