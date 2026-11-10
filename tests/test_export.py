@@ -37,5 +37,25 @@ class ExportIntegrationTests(unittest.TestCase):
             self.assertEqual((vid["width"], vid["height"]), (1080, 1920))
 
 
+    def test_authorized_corner_blur_and_logo_export(self):
+        from PIL import Image, ImageDraw
+        from review import inspect_export
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source, output, logo = root/"input.mp4", root/"short.mp4", root/"brand.png"
+            subprocess.run([
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+                "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=12:duration=4",
+                "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)
+            ], check=True, capture_output=True, timeout=60)
+            image = Image.new("RGBA",(200,85),(0,0,0,0))
+            ImageDraw.Draw(image).rectangle((15,15,180,70),fill=(200,20,20,255))
+            image.save(logo)
+            render_clip(source,output,0,3.2,"left",None,"",logo,False,"top_right")
+            data = inspect_export(output,3.2,False)
+            self.assertTrue(data["verified"])
+            self.assertEqual((data["width"],data["height"]),(1080,1920))
+
+
 if __name__ == "__main__":
     unittest.main()
