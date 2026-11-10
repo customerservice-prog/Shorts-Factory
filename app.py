@@ -102,8 +102,11 @@ def iter_job_folders(newest_first: bool = False) -> list[Path]:
 
 
 def cleanup_old_jobs():
-    # Keep finished projects by default. Cleanup is explicit opt-in because
-    # exported videos and source uploads may be valuable user-created work.
+    # Existing Railway services may still define JOB_TTL_HOURS=48.
+    # NEVER delete finished projects on that setting alone.
+    # Automatic cleanup requires a separate, explicit, opt-in switch.
+    if os.getenv("AUTODELETE_FINISHED_JOBS", "false").lower() not in ("true", "1"):
+        return
     ttl_hours = int(os.getenv("JOB_TTL_HOURS", "0"))
     if ttl_hours <= 0:
         return

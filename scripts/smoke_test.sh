@@ -16,7 +16,7 @@ cleanup() {
 trap cleanup EXIT
 
 docker run -d --name "$NAME" -p 127.0.0.1:18781:8080 \
-  -e APP_PASSWORD="$TOKEN" -e WHISPER_MODEL=tiny \
+  -e APP_PASSWORD="$TOKEN" -e WHISPER_MODEL=tiny -e JOB_TTL_HOURS=48 \
   -v "$VOLUME":/data shorts-factory-test >/dev/null
 
 ready=0
