@@ -283,11 +283,12 @@ assert abs(job["clips"][0]["length"] - 4) < 1.0
 PY
 curl -fsS -H "X-Access-Key: $TOKEN" \
   "$URL/api/jobs/$brand_id/files/clip_01.mp4" -o "$DIR/brand-full.mp4"
-python - "$DIR/brand-full.mp4" <<'PY'
-import json,subprocess,sys
-media=json.loads(subprocess.run(["ffprobe","-v","error","-show_entries",
-"format=duration:stream=codec_type,width,height","-of","json",sys.argv[1]],
-check=True,capture_output=True,text=True).stdout)
+docker exec "$NAME" ffprobe -v error -show_entries \
+  format=duration:stream=codec_type,width,height -of json \
+  "/data/$brand_id/outputs/clip_01.mp4" > "$DIR/brand-probe.json"
+python - "$DIR/brand-probe.json" <<'PY'
+import json,sys
+media=json.load(open(sys.argv[1]))
 video=next(x for x in media["streams"] if x["codec_type"]=="video")
 assert (video["width"],video["height"])==(320,180),video
 assert abs(float(media["format"]["duration"])-4)<.6
