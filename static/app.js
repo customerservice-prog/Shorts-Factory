@@ -1201,6 +1201,42 @@
     }
   }
 
+  async function uploadFullVideoLogo(file) {
+    if (!file) return;
+    const button = $("brandCustomLogoBtn");
+    const status = $("brandCustomLogoStatus");
+    if (brandBatchBusy) return toast("Finish the current batch upload before changing the logo.");
+    if (!/\.(png|jpe?g|webp)$/i.test(file.name) || file.size <= 0 || file.size > 8 * 1048576) {
+      status.textContent = "Choose a valid PNG, JPG or WEBP image no larger than 8 MB.";
+      return toast(status.textContent);
+    }
+    button.disabled = true;
+    button.textContent = "Uploading logo…";
+    status.textContent = "Saving your logo so it can be reused on future videos…";
+    try {
+      const name = "Custom logo · " + file.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim().slice(0, 40);
+      const form = new FormData();
+      form.append("name", name);
+      form.append("logo", file, file.name);
+      const response = await api("/api/brands", {method: "POST", body: form});
+      const saved = await response.json();
+      await loadBrands(saved.id);
+      $("brandOnlyProfile").value = saved.id;
+      $("brandLogoAlreadyEmbedded").checked = false;
+      invalidateCleanupPreview("Custom logo changed. Render a new processed preview frame.");
+      await updateFullVideoPreview(true);
+      status.textContent = "✓ " + saved.name + " saved and selected for all new uploads in this batch.";
+      toast("Custom logo ready. It will appear on new video exports.");
+    } catch (error) {
+      status.textContent = "Couldn't save logo: " + error.message;
+      toast(status.textContent);
+    } finally {
+      $("brandCustomLogoFile").value = "";
+      button.disabled = false;
+      button.textContent = "＋ Upload logo image";
+    }
+  }
+
   function pickBrandBatchFiles(files) {
     if (brandBatchBusy) return;
     const all = Array.from(files || []);
@@ -1290,6 +1326,10 @@
     setupCleanupEditor();
     $("autoCleanup").addEventListener("change",updateBrandBatchButton);
     $("cleanupAuthorized").addEventListener("change",updateBrandBatchButton);
+    $("brandCustomLogoBtn").addEventListener("click", () => $("brandCustomLogoFile").click());
+    $("brandCustomLogoFile").addEventListener("change", event => {
+      uploadFullVideoLogo(event.target.files?.[0]);
+    });
     $("brandOnlyProfile").addEventListener("change", () => {
       invalidateCleanupPreview("Channel logo changed. Render a new processed frame.");
       updateFullVideoPreview(true);
