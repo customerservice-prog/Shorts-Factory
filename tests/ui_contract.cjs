@@ -41,3 +41,9 @@ assert.ok(css.includes(".clip-cover img.thumb-loaded"), "Real thumbnail card sty
 assert.ok(css.includes(".review-stage"), "Review studio styles missing");
 
 console.log("UI contract valid: unique DOM IDs, wired controls, secure thumbnail endpoint and player.");
+
+assert.ok(script.includes("let showingNewProject = true"), "Brand uploader should be the default when loading the site");
+assert.ok(script.includes('showingNewProject = true;\n      selectedJobId = null;'), "New project must clear old results selection");
+assert.ok(script.includes('document.body.classList.remove("has-results")'), "New project must reveal brand uploader, not keep results-only CSS");
+assert.ok(script.includes('if (!showingNewProject) {'), "Polling must not replace the new uploader with an old export");
+assert.ok(html.includes('Brand full videos. Automatically.'), "Batch branding section must be visible in new-project flow");
