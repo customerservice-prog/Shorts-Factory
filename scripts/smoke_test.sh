@@ -34,8 +34,9 @@ curl -fsS -H "X-Access-Key: $TOKEN" "$URL/api/brands" > "$DIR/brands.json"
 python - "$DIR/brands.json" <<'PY'
 import json,sys
 brands=json.load(open(sys.argv[1]))
-assert brands["default"] == "bajo-mundo"
+assert brands["default"] == "bajo-mundo-studio"
 assert any(x["id"]=="bajo-mundo" for x in brands["brands"])
+assert any(x["id"]=="bajo-mundo-studio" for x in brands["brands"])
 PY
 curl -fsS --max-time 60 -H "X-Access-Key: $TOKEN" "$URL/api/brands/bajo-mundo/logo" -o "$DIR/logo.png"
 python - "$DIR/logo.png" <<'PY'
@@ -53,6 +54,17 @@ import json, sys
 health = json.load(open(sys.argv[1]))
 assert health.get("status") == "ok"
 assert health.get("ffmpeg") and health.get("ffprobe"), health
+PY
+
+curl -fsS --max-time 60 -H "X-Access-Key: $TOKEN" \
+  "$URL/api/brands/bajo-mundo-studio/logo" -o "$DIR/studio-logo.png"
+python - "$DIR/studio-logo.png" <<'PY'
+from PIL import Image
+import sys
+with Image.open(sys.argv[1]) as picture:
+    assert picture.mode == "RGBA"
+    assert picture.size == (1000, 340)
+    assert picture.getchannel("A").getextrema() == (0, 255)
 PY
 
 # A Railway persistent volume includes a protected lost+found directory.
@@ -216,7 +228,7 @@ job = json.load(open(sys.argv[2]))
 assert len(job["clips"]) == 2, job
 assert job["review"]["monetization_guaranteed"] is False
 assert job["clips"][0]["technical"]["verified"] is True
-assert job["brand_id"] == "bajo-mundo"
+assert job["brand_id"] == "bajo-mundo-studio"
 with zipfile.ZipFile(sys.argv[1]) as zipped:
     assert "clip_01.mp4" in zipped.namelist()
     assert "clip_01_focus_left_01.mp4" in zipped.namelist()
@@ -239,15 +251,18 @@ code="$(curl -sS -H "X-Access-Key: $TOKEN" -o /dev/null -w '%{http_code}' \
   "$URL/api/brand-only")"
 test "$code" = "400"
 curl -fsS -H "X-Access-Key: $TOKEN" \
-  -F "video=@$DIR/source.mp4" -F "brand_id=bajo-mundo" \
+  -F "video=@$DIR/source.mp4" -F "brand_id=bajo-mundo-studio" \
   -F "rights_acknowledged=true" -F "logo_position=top_right" \
+  -F "logo_size=33" -F "logo_opacity=90" \
   -F "rights=unknown" -F "audio_rights=unknown" \
   "$URL/api/brand-only" > "$DIR/brand-submit.json"
 brand_id="$(python - "$DIR/brand-submit.json" <<'PY'
 import json,sys
 job=json.load(open(sys.argv[1]))
 assert job["mode"] == "brand_only"
-assert job["brand_id"] == "bajo-mundo"
+assert job["brand_id"] == "bajo-mundo-studio"
+assert job["logo_size"] == 33
+assert job["logo_opacity"] == 90
 print(job["id"])
 PY
 )"
@@ -277,6 +292,8 @@ assert job["zip_file"] is None, "Do not duplicate MP4 storage for batch branding
 assert len(job["clips"]) == 1
 assert job["clips"][0]["technical"]["verified"]
 assert job["clips"][0]["technical"]["full_length"]
+assert job["clips"][0]["technical"]["logo_added"]
+assert job["clips"][0]["technical"]["logo_size"] == 33
 assert job["review"]["monetization_guaranteed"] is False
 assert job["clips"][0]["captions"] is False
 assert abs(job["clips"][0]["length"] - 4) < 1.0
