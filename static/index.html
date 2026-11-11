@@ -7,7 +7,7 @@
   <title>Shorts Factory — AI Clip Studio</title>
   <meta name="description" content="Turn long videos into captioned, branded, vertical Shorts with a private editing studio.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=10">
+  <link rel="stylesheet" href="/style.css?v=11">
 </head>
 <body>
   <div class="app-shell">
@@ -138,7 +138,7 @@
           <div class="brand-quick-head">
             <span class="eyebrow"><span class="ready-dot"></span> FAST MODE · NO CUTTING</span>
             <h2>Brand full videos. Automatically.</h2>
-            <p>Select one video or a batch of videos. Shorts Factory keeps every second and the original audio, adds your chosen channel logo, and saves each video separately. No Whisper transcription or highlight cuts.</p>
+            <p>Select one video or a batch of videos. Shorts Factory keeps your entire footage and original audio, applies the original Bajo Mundo TV logo, and can add Spanish speech subtitles and a short follow banner. No highlight cuts.</p>
           </div>
           <div class="brand-quick-grid">
             <div class="brand-file-drop" id="brandBatchDrop" role="button" tabindex="0" aria-label="Choose one or more entire videos">
@@ -156,6 +156,8 @@
                   <span class="watermark-demo-label">LIVE LOGO PREVIEW</span>
                   <img id="watermarkPreviewImg" alt="Selected Bajo Mundo TV watermark" hidden>
                   <span class="watermark-demo-scene">▶ &nbsp; VIDEO</span>
+                  <span class="show-banner-demo" id="showBannerDemo">SÍGUENOS PARA MÁS</span>
+                  <span class="show-caption-demo" id="showCaptionDemo">LA MÚSICA SE VIVE AQUÍ</span>
                 </div>
                 <p id="watermarkPreviewMessage">Preview how the selected watermark will look at video size.</p>
               </div>
@@ -169,6 +171,25 @@
                 <input id="brandLogoAlreadyEmbedded" type="checkbox">
                 This video already contains the correct Bajo Mundo TV logo — don't add a second copy
               </label>
+              <div class="brand-show-style">
+                <strong>Show-style video presentation</strong>
+                <small>Original footage stays full-length. Added subtitles are automatically timed and must be proofread.</small>
+                <label for="brandSubtitleMode">Spanish speech subtitles</label>
+                <select id="brandSubtitleMode">
+                  <option value="auto" selected>Automatic speech captions · review accuracy</option>
+                  <option value="none">No added subtitles</option>
+                </select>
+                <label for="brandSubtitleStyle">Subtitle appearance</label>
+                <select id="brandSubtitleStyle">
+                  <option value="show" selected>Show style · bold gold captions</option>
+                  <option value="clean">Clean style · white captions</option>
+                </select>
+                <label class="show-follow-toggle">
+                  <input id="brandFollowBanner" type="checkbox" checked>
+                  Display “SÍGUENOS PARA MÁS” for the first 3 seconds
+                </label>
+                <p>These are edits to your actual video, not a claim that someone else's music is yours. No automatic Facebook publishing.</p>
+              </div>
               <label for="brandOnlyPosition">Logo placement</label>
               <select id="brandOnlyPosition"><option value="top_right">Top right (recommended)</option><option value="top_left">Top left</option><option value="bottom_right">Bottom right</option><option value="bottom_left">Bottom left</option></select>
               <details class="brand-optional">
@@ -178,9 +199,11 @@
                   <label for="brandCropBottom">Crop picture bottom (%) <input id="brandCropBottom" type="number" min="0" max="25" value="0"></label>
                   <label for="brandOnlyRights">Footage rights<select id="brandOnlyRights"><option value="unknown">Not verified</option><option value="owned">I created/own the footage</option><option value="licensed">Commercial use licensed</option><option value="commentary">Commentary/criticism · review needed</option></select></label>
                   <label for="brandOnlyAudio">Music and audio rights<select id="brandOnlyAudio"><option value="unknown">Not verified</option><option value="owned">I own all audio</option><option value="licensed">Licensed for commercial use</option><option value="no_music">No third-party audio</option></select></label>
-                  <label for="brandOnlyOriginality">Original contribution<select id="brandOnlyOriginality"><option value="unknown">Not verified</option><option value="original">Original footage I created</option><option value="substantial_commentary">Substantial new analysis/storytelling</option><option value="minimal">Just branding/cropping</option></select></label>
+                  <label for="brandOnlyOriginality">Original contribution<select id="brandOnlyOriginality"><option value="unknown">Not verified</option><option value="original">I personally recorded this video</option><option value="substantial_commentary">Substantial analysis/storytelling added</option><option value="minimal">Only branding/captions/cropping</option></select></label>
+                  <label for="brandPerformancePermission">Artist/performance release<select id="brandPerformancePermission"><option value="unknown">Not verified</option><option value="written">I have written commercial publishing permission</option><option value="not_applicable">No artist/third-party performance involved</option></select></label>
+                  <label for="brandReleaseReference">Where permission is documented<input type="text" id="brandReleaseReference" maxlength="300" placeholder="Optional: license, agreement, or reference"></label>
                 </div>
-                <p>Top/bottom crops remove picture pixels, not video duration. They cannot reconstruct hidden footage or automatically remove embedded graphics.</p>
+                <p>Top/bottom crops change the visible picture, not the duration. Even if you filmed the artist yourself, audio/composition and performance rights need separate verification. The studio cannot guarantee Facebook approval or prevent claims.</p>
               </details>
             </div>
           </div>
@@ -279,6 +302,6 @@
   </div>
   <div class="modal-backdrop hidden" id="authModal"><form class="auth-modal" id="authForm"><div class="auth-icon">▶</div><h2>Welcome to your studio</h2><p>Enter the private password configured for your Shorts Factory server.</p><label for="accessPassword">Access password</label><input type="password" id="accessPassword" autocomplete="current-password" placeholder="Your studio password" required><button type="submit" class="generate-button">Unlock studio <span>↗</span></button><span class="auth-error" id="authError"></span></form></div>
   <div class="toast hidden" id="toast" role="status"></div>
-  <script src="/app.js?v=10" defer></script>
+  <script src="/app.js?v=11" defer></script>
 </body>
 </html>
