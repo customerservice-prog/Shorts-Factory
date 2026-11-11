@@ -62,6 +62,21 @@ class FullLengthBrandingTests(unittest.TestCase):
         self.assertLess(technical["height"], before["height"])
         self.assertAlmostEqual(technical["duration"],before["duration"],delta=.4)
 
+    def test_custom_size_and_opacity(self):
+        outcome = brand_full_video(self.source, self.target, self.logo,
+                                   logo_size=38, logo_opacity=70)
+        self.assertTrue(outcome["logo_added"])
+        self.assertEqual(outcome["logo_size"], 38)
+        self.assertEqual(outcome["logo_opacity"], 70)
+        self.assertTrue(outcome["full_length"])
+
+    def test_existing_logo_can_skip_double_overlay(self):
+        result = brand_full_video(self.source, self.target, None)
+        self.assertFalse(result["logo_added"])
+        self.assertEqual(result["logo_size"], 0)
+        self.assertTrue(result["full_length"])
+        self.assertTrue(result["audio"])
+
     def test_unsafe_settings_rejected(self):
         with self.assertRaises(ValueError):
             brand_full_video(self.source,self.source,self.logo)
@@ -69,3 +84,7 @@ class FullLengthBrandingTests(unittest.TestCase):
             brand_full_video(self.source,self.target,self.logo,position="outside")
         with self.assertRaises(ValueError):
             brand_full_video(self.source,self.target,self.logo,crop_top=55)
+        with self.assertRaises(ValueError):
+            brand_full_video(self.source,self.target,self.logo,logo_size=50)
+        with self.assertRaises(ValueError):
+            brand_full_video(self.source,self.target,self.logo,logo_opacity=40)

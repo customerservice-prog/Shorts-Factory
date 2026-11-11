@@ -18,7 +18,10 @@ for (const id of ["results", "clipsGrid", "clipQueue", "featuredVideo", "feature
   "brandQuick", "brandBatchFiles", "brandBatchDrop", "brandBatchBrowse", "brandOnlyProfile",
   "brandBatchSubmit", "brandRightsAcknowledged", "brandBatchStatus", "brandOnlyPosition",
   "brandCropTop", "brandCropBottom", "brandOnlyRights", "brandOnlyAudio", "brandOnlyOriginality",
-  "resultsTitle", "galleryTitle", "reframeTool"]) {
+  "resultsTitle", "galleryTitle", "reframeTool", "watermarkPreviewImg",
+  "watermarkDemo", "brandLogoSize", "brandLogoOpacity",
+  "brandLogoSizeValue", "brandLogoOpacityValue", "brandLogoAlreadyEmbedded",
+  "watermarkPreviewMessage"]) {
   assert.ok(ids.includes(id), "Review studio lacks: " + id);
 }
 
@@ -47,3 +50,9 @@ assert.ok(script.includes('showingNewProject = true;\n      selectedJobId = null
 assert.ok(script.includes('document.body.classList.remove("has-results")'), "New project must reveal brand uploader, not keep results-only CSS");
 assert.ok(script.includes('if (!showingNewProject) {'), "Polling must not replace the new uploader with an old export");
 assert.ok(html.includes('Brand full videos. Automatically.'), "Batch branding section must be visible in new-project flow");
+
+assert.ok(script.includes("updateFullVideoPreview"), "Watermark preview not wired");
+assert.ok(script.includes('form.append("logo_size"'), "Size control not passed to backend");
+assert.ok(script.includes('form.append("logo_opacity"'), "Opacity control not passed to backend");
+assert.ok(script.includes('form.append("logo_already_embedded"'), "Double logo prevention missing");
+assert.ok(backend.includes('"default": "bajo-mundo-studio"'), "New default brand not enabled");

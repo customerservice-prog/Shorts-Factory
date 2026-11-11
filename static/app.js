@@ -9,6 +9,8 @@
   let layout = "fill";
   let channelProfiles = [];
   let brandPreviewUrl = null;
+  let fullVideoPreviewUrl = null;
+  let fullVideoPreviewRequest = 0;
   let brandBatchFiles = [];
   let brandBatchBusy = false;
   let currentPreview = null;
@@ -115,12 +117,12 @@
   };
 
 
-  async function loadBrands(selectedId = "bajo-mundo") {
+  async function loadBrands(selectedId = "bajo-mundo-studio") {
     const response = await api("/api/brands");
     const data = await response.json();
     channelProfiles = data.brands || [];
     const select = $("brandProfile");
-    const safe = channelProfiles.some(p => p.id === selectedId) ? selectedId : "bajo-mundo";
+    const safe = channelProfiles.some(p => p.id === selectedId) ? selectedId : "bajo-mundo-studio";
     select.replaceChildren();
     for (const brand of channelProfiles) {
       const option = document.createElement("option");
@@ -138,8 +140,9 @@
       batch.appendChild(option);
     }
     batch.value = channelProfiles.some(p => p.id === old && p.logo_url) ? old :
-      (channelProfiles.some(p => p.id === safe && p.logo_url) ? safe : "bajo-mundo");
+      (channelProfiles.some(p => p.id === safe && p.logo_url) ? safe : "bajo-mundo-studio");
     await updateBrandPreview();
+    await updateFullVideoPreview(true);
   }
 
   async function updateBrandPreview() {
@@ -831,6 +834,48 @@
   }
 
 
+
+  async function updateFullVideoPreview(fetchLogo=false) {
+    const logo = $("watermarkPreviewImg");
+    const profile = channelProfiles.find(p => p.id === $("brandOnlyProfile").value);
+    const skipped = $("brandLogoAlreadyEmbedded").checked;
+    const percent = Number($("brandLogoSize").value);
+    const alpha = Number($("brandLogoOpacity").value);
+    $("brandLogoSizeValue").textContent = percent + "%";
+    $("brandLogoOpacityValue").textContent = alpha + "%";
+    $("watermarkPreviewMessage").textContent = skipped ?
+      "No extra watermark will be burned in. Your existing on-video logo stays." :
+      "New exports will display " + (profile?.name || "your logo") +
+      " at " + percent + "% of the video width.";
+    logo.style.width = percent + "%";
+    logo.style.opacity = alpha / 100;
+    logo.hidden = skipped || !profile?.logo_url;
+    const sample = $("watermarkDemo");
+    sample.dataset.position = $("brandOnlyPosition").value;
+    if (!fetchLogo) return;
+    const serial = ++fullVideoPreviewRequest;
+    if (fullVideoPreviewUrl) {
+      URL.revokeObjectURL(fullVideoPreviewUrl);
+      fullVideoPreviewUrl = null;
+    }
+    logo.removeAttribute("src");
+    if (!profile?.logo_url) return;
+    try {
+      const response = await api(profile.logo_url);
+      const url = URL.createObjectURL(await response.blob());
+      if (serial !== fullVideoPreviewRequest ||
+          $("brandOnlyProfile").value !== profile.id) {
+        URL.revokeObjectURL(url);
+        return;
+      }
+      fullVideoPreviewUrl = url;
+      logo.src = url;
+      logo.hidden = $("brandLogoAlreadyEmbedded").checked;
+    } catch (_) {
+      $("watermarkPreviewMessage").textContent = "Preview unavailable. The selected logo can still be checked before export.";
+    }
+  }
+
   function pickBrandBatchFiles(files) {
     if (brandBatchBusy) return;
     const all = Array.from(files || []);
@@ -873,6 +918,9 @@
         form.append("video", file, file.name);
         form.append("brand_id", $("brandOnlyProfile").value);
         form.append("logo_position", $("brandOnlyPosition").value);
+        form.append("logo_size", $("brandLogoSize").value);
+        form.append("logo_opacity", $("brandLogoOpacity").value);
+        form.append("logo_already_embedded", $("brandLogoAlreadyEmbedded").checked ? "true" : "false");
         form.append("crop_top", String(top));
         form.append("crop_bottom", String(bottom));
         form.append("rights", $("brandOnlyRights").value);
@@ -901,6 +949,12 @@
     }
   }
   function setupBrandOnly() {
+    $("brandOnlyProfile").addEventListener("change", () => updateFullVideoPreview(true));
+    for (const id of ["brandOnlyPosition", "brandLogoSize", "brandLogoOpacity",
+                      "brandLogoAlreadyEmbedded"]) {
+      $(id).addEventListener("input", () => updateFullVideoPreview(false));
+      $(id).addEventListener("change", () => updateFullVideoPreview(false));
+    }
     $("brandBatchBrowse").addEventListener("click", e => {
       e.stopPropagation(); $("brandBatchFiles").click();
     });

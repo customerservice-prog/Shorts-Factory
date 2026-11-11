@@ -409,3 +409,32 @@ body.has-results .studio-hero{display:none}
 
 /* Keep the focused editor invisible when a saved project is being reviewed. */
 body.has-results:not(.show-editor) .brand-quick{display:none}
+
+
+/* V10 - compact, code-rendered channel watermark preview + sizing */
+.watermark-preview{margin:8px 0 6px}
+.watermark-demo{height:152px;position:relative;overflow:hidden;border-radius:11px;border:1px solid #415567;
+  background:radial-gradient(ellipse at 52% 35%,#465b5e 0,#35414b 34%,#171d28 76%),#1b2430}
+.watermark-demo:before{content:"";position:absolute;width:180px;height:220px;
+  top:48px;left:12px;transform:rotate(-18deg);border-radius:42% 42% 0 0;background:#202c34bb}
+.watermark-demo:after{content:"";position:absolute;width:70px;height:75px;
+  border-radius:50%;bottom:-20px;right:48px;background:#515c61aa}
+.watermark-demo-label{position:absolute;z-index:1;top:12px;left:12px;font-size:9px;
+  letter-spacing:1.1px;font-weight:850;color:#d9e6de;background:#111923cc;padding:6px 7px;border-radius:6px}
+.watermark-demo-scene{position:absolute;z-index:1;inset:0;display:grid;place-items:center;font-weight:800;
+  font-size:20px;color:#ffffff50;letter-spacing:3px;pointer-events:none}
+.watermark-demo img{position:absolute;z-index:2;max-width:40%;height:auto;object-fit:contain;
+  filter:drop-shadow(0 2px 5px #0008);transition:width .12s,opacity .12s}
+.watermark-demo[data-position="top_right"] img{top:12px;right:12px}
+.watermark-demo[data-position="top_left"] img{top:12px;left:12px}
+.watermark-demo[data-position="bottom_right"] img{bottom:12px;right:12px}
+.watermark-demo[data-position="bottom_left"] img{bottom:12px;left:12px}
+.watermark-preview p{font-size:10px;line-height:1.5;color:#b4c7ca;margin:7px 0 0}
+.watermark-settings{display:grid;gap:7px;margin-top:10px}
+.watermark-settings label{display:flex;justify-content:space-between;align-items:center;
+  font-weight:700;font-size:11px;color:#d1e3dc}
+.watermark-settings output{color:#c8f66a;font-variant-numeric:tabular-nums}
+.watermark-settings input{width:100%;accent-color:#c8f66a;height:18px;margin:0 0 8px;cursor:pointer}
+.watermark-avoid-duplicate{display:flex;align-items:flex-start;gap:8px;font-size:10.5px;
+  line-height:1.55;color:#aec2c5;margin:2px 0 8px}
+.watermark-avoid-duplicate input{flex-shrink:0;margin:3px 0 0;accent-color:#b6f466}

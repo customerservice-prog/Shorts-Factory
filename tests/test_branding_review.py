@@ -51,5 +51,24 @@ class BrandLogoTests(unittest.TestCase):
                     self.assertEqual(smallest,0)
                     self.assertGreater(largest,200)
 
+    def test_studio_watermark_is_transparent_and_readable_size(self):
+        from PIL import Image
+        import branding
+        with tempfile.TemporaryDirectory() as temporary:
+            folder = Path(temporary)
+            with patch.object(branding, "BRAND_DIR", folder), patch.object(
+                branding, "STUDIO_LOGO", folder / "studio.png"
+            ):
+                asset = branding.brand_path("bajo-mundo-studio")
+                self.assertTrue(asset.exists())
+                with Image.open(asset) as image:
+                    self.assertEqual(image.mode, "RGBA")
+                    self.assertEqual(image.size, (1000, 340))
+                    self.assertEqual(image.getchannel("A").getextrema(), (0, 255))
+                    self.assertGreater(asset.stat().st_size, 7000)
+        brands = branding.list_brands()
+        self.assertEqual(brands[0]["id"], "bajo-mundo-studio")
+        self.assertEqual(brands[1]["id"], "bajo-mundo")
+
 if __name__=="__main__":
     unittest.main()

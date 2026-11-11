@@ -16,6 +16,7 @@ STUDIO_BASE = Path(os.getenv("DATA_DIR", "./data")).resolve()
 BRAND_DIR = STUDIO_BASE / "channel-brands"
 SOURCE = ROOT / "static" / "brands" / "bajo-mundo-original.webp"
 DEFAULT_LOGO = BRAND_DIR / "bajo-mundo-transparent.png"
+STUDIO_LOGO = BRAND_DIR / "bajo-mundo-studio-v1.png"
 PROFILE_ID = re.compile(r"^[0-9a-f]{20}$")
 MAX_BRANDS = 20
 
@@ -91,9 +92,75 @@ def prepare_default_logo():
     return DEFAULT_LOGO
 
 
+
+def prepare_studio_logo():
+    """Draw a compact, readable Bajo Mundo TV video logo with Pillow.
+
+    The wide wordmark retains visibility at phone-playback size.
+    No user logo or existing render is overwritten.
+    """
+    if STUDIO_LOGO.is_file() and STUDIO_LOGO.stat().st_size > 7000:
+        return STUDIO_LOGO
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter
+    _ensure_dir()
+    width, height = 1000, 340
+    im = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    glow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow)
+    gd.rounded_rectangle((27, 31, 973, 309), radius=82,
+                         outline=(237, 46, 23, 125), width=14)
+    im.alpha_composite(glow.filter(ImageFilter.GaussianBlur(12)))
+    d = ImageDraw.Draw(im)
+    d.rounded_rectangle((22, 24, 978, 315), radius=82,
+                        fill=(9, 13, 21, 246), outline=(247, 73, 32, 253),
+                        width=9)
+    d.rounded_rectangle((32, 34, 968, 305), radius=75,
+                        outline=(255, 202, 57, 210), width=4)
+    d.line([(115, 77), (145, 48), (176, 78)], fill=(255, 208, 65, 255),
+           width=10, joint="curve")
+    d.ellipse((136, 39, 154, 57), fill=(255, 233, 108, 255))
+    d.rounded_rectangle((63, 79, 236, 258), radius=43,
+                        fill=(191, 23, 30, 255), outline=(255, 202, 61, 255),
+                        width=9)
+    d.rounded_rectangle((78, 96, 220, 240), radius=28,
+                        fill=(23, 26, 37, 255), outline=(255, 243, 223, 230),
+                        width=4)
+    d.polygon([(124, 130), (124, 208), (181, 169)],
+              fill=(255, 214, 72, 255))
+    for yy, length in ((123, 23), (167, 32), (212, 23)):
+        d.line([(252, yy), (252+length, yy)], fill=(245, 167, 48, 255),
+               width=8)
+    font = "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf"
+    if not Path(font).is_file():
+        font = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    bold = ImageFont.truetype(font, 108)
+    large = ImageFont.truetype(font, 111)
+    small = ImageFont.truetype(font, 28)
+    d.text((306, 49), "BAJO", font=bold, fill=(252, 252, 251, 255),
+           stroke_width=4, stroke_fill=(19, 24, 32, 255))
+    d.text((302, 152), "MUNDO", font=large, fill=(254, 203, 54, 255),
+           stroke_width=5, stroke_fill=(34, 17, 8, 255))
+    d.rounded_rectangle((760, 97, 941, 190), radius=27,
+                        fill=(195, 29, 33, 255),
+                        outline=(255, 218, 89, 255), width=5)
+    tv_font = ImageFont.truetype(font, 72)
+    box = d.textbbox((0, 0), "TV", font=tv_font)
+    d.text((850 - (box[2]-box[0])//2, 98), "TV", font=tv_font,
+           fill=(255, 255, 253, 255), stroke_width=2,
+           stroke_fill=(75, 22, 25, 255))
+    d.text((329, 273), "MÚSICA  ·  CULTURA  ·  CALLE", font=small,
+           fill=(228, 222, 208, 240))
+    temp = STUDIO_LOGO.with_suffix(".tmp.png")
+    im.save(temp, format="PNG", optimize=True)
+    temp.replace(STUDIO_LOGO)
+    return STUDIO_LOGO
+
+
 def brand_path(brand_id):
     if brand_id == "none":
         return None
+    if brand_id == "bajo-mundo-studio":
+        return prepare_studio_logo()
     if brand_id == "bajo-mundo":
         return prepare_default_logo()
     if not PROFILE_ID.fullmatch(brand_id or ""):
@@ -106,7 +173,9 @@ def brand_path(brand_id):
 
 
 def list_brands():
-    result = [{"id": "bajo-mundo", "name": "Bajo Mundo TV",
+    result = [{"id": "bajo-mundo-studio", "name": "Bajo Mundo TV · Studio watermark",
+               "built_in": True, "logo_url": "/api/brands/bajo-mundo-studio/logo"},
+              {"id": "bajo-mundo", "name": "Bajo Mundo TV · Original logo",
                "built_in": True, "logo_url": "/api/brands/bajo-mundo/logo"},
               {"id": "none", "name": "No logo", "built_in": True, "logo_url": None}]
     if not BRAND_DIR.is_dir():
@@ -130,7 +199,7 @@ def save_brand(name, file_path):
     name = " ".join((name or "").split())[:55]
     if len(name) < 2:
         raise ValueError("Enter a channel name")
-    if len(list_brands()) - 2 >= MAX_BRANDS:
+    if len(list_brands()) - 3 >= MAX_BRANDS:
         raise ValueError("Channel profile limit reached")
     try:
         with Image.open(file_path) as source:
