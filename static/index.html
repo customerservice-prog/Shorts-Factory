@@ -7,7 +7,7 @@
   <title>Shorts Factory — AI Clip Studio</title>
   <meta name="description" content="Turn long videos into captioned, branded, vertical Shorts with a private editing studio.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=13">
+  <link rel="stylesheet" href="/style.css?v=14">
 </head>
 <body>
   <div class="app-shell">
@@ -186,12 +186,24 @@
                   <small>Remove embedded text, stickers or old channel graphics before applying the original Bajo Mundo TV logo.</small>
                 </div>
                 <div class="cleanup-video-shell hidden" id="cleanupVideoShell">
+                  <span class="cleanup-before-label">ORIGINAL VIDEO · NOT CLEANED</span>
                   <video id="cleanupVideo" muted playsinline preload="metadata" aria-label="Original video cleanup preview"></video>
                   <div id="cleanupDrawLayer" class="cleanup-draw-layer" aria-label="Draw a rectangle around an unwanted graphic"></div>
                 </div>
                 <div class="cleanup-seek hidden" id="cleanupSeekPanel">
                   <button type="button" id="cleanupPlay">▶ Play / Pause</button>
                   <input id="cleanupSeek" type="range" min="0" max="100" step="0.1" value="0" aria-label="Scrub video to inspect overlays">
+                </div>
+                <div class="cleanup-preview-controls">
+                  <button type="button" id="cleanupPreviewBtn" disabled>▶ Preview actual cleaned frame</button>
+                  <p id="cleanupPreviewNotice" role="status">The video above is your ORIGINAL. Boxes only mark areas; they do not erase anything until processing. Generate a before/after frame to check the effect.</p>
+                </div>
+                <div class="cleanup-processed-result hidden" id="cleanupProcessedResult">
+                  <div class="cleanup-comparison">
+                    <figure><figcaption>BEFORE · source footage</figcaption><img id="cleanupBeforeFrame" alt="Original frame before cleanup"></figure>
+                    <figure><figcaption>AFTER · real FFmpeg cleanup + Bajo Mundo logo</figcaption><img id="cleanupAfterFrame" alt="Actual processed frame with attempted cleanup"></figure>
+                  </div>
+                  <p>One frame only. Blurring, missing details or old graphics elsewhere in the video can still remain. This is not a copyright or monetization clearance.</p>
                 </div>
                 <label class="cleanup-auto">
                   <input type="checkbox" id="autoCleanup" checked>
@@ -339,6 +351,6 @@
   </div>
   <div class="modal-backdrop hidden" id="authModal"><form class="auth-modal" id="authForm"><div class="auth-icon">▶</div><h2>Welcome to your studio</h2><p>Enter the private password configured for your Shorts Factory server.</p><label for="accessPassword">Access password</label><input type="password" id="accessPassword" autocomplete="current-password" placeholder="Your studio password" required><button type="submit" class="generate-button">Unlock studio <span>↗</span></button><span class="auth-error" id="authError"></span></form></div>
   <div class="toast hidden" id="toast" role="status"></div>
-  <script src="/app.js?v=13" defer></script>
+  <script src="/app.js?v=14" defer></script>
 </body>
 </html>
