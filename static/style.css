@@ -406,3 +406,6 @@ body.has-results .studio-hero{display:none}
 .brand-quick-footer>div{font-size:11px;flex:1;min-width:180px;color:#a9bdc1;line-height:1.65;overflow-wrap:anywhere}
 @media(max-width:850px){.brand-quick-grid{grid-template-columns:1fr}.brand-file-drop{min-height:168px}.brand-quick-controls{padding:15px}}
 @media(max-width:500px){.brand-quick{padding:15px}.brand-quick-head h2{font-size:25px}.brand-quick-footer button{width:100%}.brand-optional-grid{grid-template-columns:1fr}.brand-optional-grid label:nth-child(n+3){grid-column:auto}}
+
+/* Keep the focused editor invisible when a saved project is being reviewed. */
+body.has-results:not(.show-editor) .brand-quick{display:none}

@@ -531,8 +531,10 @@
       '" data-clip-thumb="' + esc(first.file) + '" alt="Video thumbnail" loading="lazy">' : '<span>▶</span>';
     return '<article class="history-item"><span class="history-file-icon">' + poster + '</span>' +
       '<div class="history-details"><strong title="' + esc(job.filename) + '">' + esc(job.filename) + '</strong>' +
-      '<p>' + esc(date) + ' · ' + esc((job.clips || []).length || job.clip_count) +
-      ' clips · ' + esc(job.clip_length) + 's target</p></div>' +
+      '<p>' + esc(date) + (job.mode === "brand_only" ?
+      ' · Full video · no cuts' :
+      ' · ' + esc((job.clips || []).length || job.clip_count) +
+      ' clips · ' + esc(job.clip_length) + 's target') + '</p></div>' +
       '<span class="status-tag ' + esc(job.status) + '">' + esc(statusLabel(job.status)) + '</span>' +
       '<button type="button" data-view="' + esc(job.id) + '">' + (job.status === "completed" ? "Open studio ↗" : "View status") + '</button>' +
       (canDelete ? '<button type="button" class="delete-btn" data-delete="' + esc(job.id) + '" aria-label="Delete project">×</button>' : "") +
@@ -561,11 +563,11 @@
       '<button type="button" class="clip-cover" data-select="' + index + '" aria-label="Preview short ' + count + '">' +
       '<span class="cover-placeholder">▣</span><img data-thumb-job="' + esc(job.id) + '" data-clip-thumb="' + esc(clip.file) +
       '" alt="Actual video frame of short ' + count + '" loading="lazy">' +
-      '<span class="clip-cover-top">SHORT ' + count + '</span>' +
+      '<span class="clip-cover-top">' + (job.mode === "brand_only" ? "VIDEO " : "SHORT ") + count + '</span>' +
       '<span class="clip-cover-play">▶</span>' +
       '<span class="clip-cover-length">' + duration + '</span>' +
       '</button><div class="clip-info">' +
-      '<div class="clip-number">HIGHLIGHT ' + count +
+      '<div class="clip-number">' + (job.mode === "brand_only" ? "FULL VIDEO " : "HIGHLIGHT ") + count +
       (index === 0 ? '<span class="top-pick">✦ TOP PICK</span>' : "") + '</div>' +
       '<h3 title="' + esc(clip.title) + '">' + esc(clip.title) + '</h3>' +
       '<div class="clip-stats"><span>◷ ' + startTime + ' in source</span><span>▣ ' + captions + '</span></div>' +
@@ -578,7 +580,7 @@
       '" aria-label="Select short ' + pad(index + 1) + '">' +
       '<span class="queue-poster"><img data-thumb-job="' + esc(job.id) +
       '" data-clip-thumb="' + esc(clip.file) + '" alt="" loading="lazy"><span>▶</span></span>' +
-      '<span class="queue-text"><small>SHORT ' + pad(index + 1) + ' · ' + clock(clip.length) + '</small>' +
+      '<span class="queue-text"><small>' + (job.mode === "brand_only" ? "VIDEO " : "SHORT ") + pad(index + 1) + ' · ' + clock(clip.length) + '</small>' +
       '<strong>' + esc(clip.title) + '</strong><em>From ' + clock(clip.start) + ' · ' +
       (clip.captions ? "Captions on" : "No captions") + '</em></span>' +
       '<span class="queue-arrow">↗</span></button>';
@@ -993,7 +995,7 @@
       showPage("create", false);
       document.body.classList.add("show-editor");
       resetSource();
-      $("createForm").scrollIntoView({behavior:"smooth",block:"start"});
+      $("brandQuick").scrollIntoView({behavior:"smooth",block:"start"});
     };
     $("newProjectBtn").addEventListener("click", openEditor);
     $("refreshBtn").addEventListener("click", () => refreshJobs().catch((e) => toast(e.message)));
