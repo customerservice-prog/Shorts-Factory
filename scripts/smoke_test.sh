@@ -377,4 +377,36 @@ data=json.load(open(sys.argv[1]))
 assert data["requires_confirmation"] is True
 assert isinstance(data["regions"], list)
 PY
+
+# Real cleanup still-frame rendering must differ from the old logo frame.
+python - "$DIR/cleanup-frame.jpg" <<'PY'
+import sys
+from PIL import Image,ImageDraw
+image=Image.new("RGB",(500,700),(22,62,205))
+ImageDraw.Draw(image).rectangle((60,70,190,150), fill=(235,25,15))
+image.save(sys.argv[1],quality=94)
+PY
+test "$(curl -sS -o /dev/null -w '%{http_code}' \
+  -F "frame=@$DIR/cleanup-frame.jpg" \
+  "$URL/api/cleanup/preview")" = "401"
+test "$(curl -sS -H "X-Access-Key: $TOKEN" -o /dev/null -w '%{http_code}' \
+  -F "frame=@$DIR/cleanup-frame.jpg" \
+  -F 'cleanup_regions=[{"x":10,"y":9,"w":34,"h":14}]' \
+  "$URL/api/cleanup/preview")" = "400"
+curl -fsS -H "X-Access-Key: $TOKEN" \
+  -F "frame=@$DIR/cleanup-frame.jpg" \
+  -F 'cleanup_regions=[{"x":10,"y":9,"w":34,"h":14}]' \
+  -F "cleanup_authorized=true" \
+  -F "brand_id=bajo-mundo" \
+  "$URL/api/cleanup/preview" -o "$DIR/cleanup-after.jpg"
+python - "$DIR/cleanup-frame.jpg" "$DIR/cleanup-after.jpg" <<'PY'
+import sys
+from PIL import Image
+with Image.open(sys.argv[1]) as before, Image.open(sys.argv[2]) as after:
+    assert after.size == (500,700)
+    red=before.getpixel((110,105))
+    corrected=after.getpixel((110,105))
+    assert red[0]>red[2]+70,(red,corrected)
+    assert corrected[2]>corrected[0],(red,corrected)
+PY
 echo "Shorts Factory container smoke test passed."

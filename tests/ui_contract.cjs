@@ -26,7 +26,9 @@ for (const id of ["results", "clipsGrid", "clipQueue", "featuredVideo", "feature
   "brandPerformancePermission", "brandReleaseReference", "cleanupVideo",
   "cleanupDrawLayer", "cleanupVideoShell", "cleanupSeek", "cleanupSeekPanel",
   "cleanupPlay", "cleanupSuggest", "cleanupClear", "cleanupApplySuggestions",
-  "cleanupAuthorized", "cleanupInfo", "cleanupGraphics"]) {
+  "cleanupAuthorized", "cleanupInfo", "cleanupGraphics",
+  "cleanupPreviewBtn", "cleanupPreviewNotice", "cleanupProcessedResult",
+  "cleanupBeforeFrame", "cleanupAfterFrame"]) {
   assert.ok(ids.includes(id), "Review studio lacks: " + id);
 }
 
@@ -81,3 +83,10 @@ assert.ok(script.includes('cleanAndRebrandSaved'), "Saved source cleanup action 
 assert.ok(backend.includes('@app.post("/api/jobs/{job_id}/clean-rebrand"'), "Saved-video rebrand API missing");
 assert.ok(script.includes('featuredPoster").classList.add("hidden")'), "Hide preview poster during playback to prevent doubled image");
 assert.ok(script.includes('cleanup_status'), "Add source graphic cleanup status to editor");
+
+assert.ok(backend.includes('@app.post("/api/cleanup/preview")'), "Processed frame preview API is missing");
+assert.ok(script.includes('renderActualCleanupFrame'), "Processed before/after comparison must be wired");
+assert.ok(script.includes('context.drawImage(video'), "Preview must capture the actual current source frame");
+assert.ok(script.includes('response.headers.get("X-Cleanup-Applied")'), "Preview must show how many areas were actually modified");
+assert.ok(html.includes('ORIGINAL VIDEO · NOT CLEANED'), "Original preview must be unambiguously labeled");
+assert.ok(html.includes('BEFORE · source footage') && html.includes('AFTER · real FFmpeg cleanup'), "Comparative preview labels absent");
