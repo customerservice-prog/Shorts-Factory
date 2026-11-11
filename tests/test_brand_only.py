@@ -77,6 +77,30 @@ class FullLengthBrandingTests(unittest.TestCase):
         self.assertTrue(result["full_length"])
         self.assertTrue(result["audio"])
 
+
+    def test_original_logo_plus_spanish_show_overlay_keeps_timeline(self):
+        from show_style import create_follow_banner, create_subtitle_file
+        root = Path(self.tmp.name)
+        banner = create_follow_banner(root / "banner.png")
+        subs = root / "captions.ass"
+        count = create_subtitle_file(
+            subs,
+            [{"start": 0.3, "end": 0.65, "text": "Mira"},
+             {"start": 0.7, "end": 1.2, "text": "esto"},
+             {"start": 1.25, "end": 1.6, "text": "ahora"}],
+            320, 600, style="show"
+        )
+        before = probe_media(self.source)
+        report = brand_full_video(self.source, self.target, self.logo,
+                                  subtitle_file=subs, follow_banner=banner)
+        after = probe_media(self.target)
+        self.assertGreater(count, 0)
+        self.assertTrue(report["captions_added"])
+        self.assertTrue(report["follow_banner"])
+        self.assertTrue(report["logo_added"])
+        self.assertTrue(after["has_audio"])
+        self.assertAlmostEqual(before["duration"],after["duration"], delta=.4)
+
     def test_unsafe_settings_rejected(self):
         with self.assertRaises(ValueError):
             brand_full_video(self.source,self.source,self.logo)

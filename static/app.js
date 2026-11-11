@@ -13,6 +13,10 @@
   let fullVideoPreviewRequest = 0;
   let brandBatchFiles = [];
   let brandBatchBusy = false;
+  let cleanupRegions = [];
+  let cleanupSuggestions = [];
+  let cleanupVideoUrl = null;
+  let cleanupDrag = null;
   let currentPreview = null;
   let toastTimer = null;
 
@@ -117,12 +121,12 @@
   };
 
 
-  async function loadBrands(selectedId = "bajo-mundo-studio") {
+  async function loadBrands(selectedId = "bajo-mundo") {
     const response = await api("/api/brands");
     const data = await response.json();
     channelProfiles = data.brands || [];
     const select = $("brandProfile");
-    const safe = channelProfiles.some(p => p.id === selectedId) ? selectedId : "bajo-mundo-studio";
+    const safe = channelProfiles.some(p => p.id === selectedId) ? selectedId : "bajo-mundo";
     select.replaceChildren();
     for (const brand of channelProfiles) {
       const option = document.createElement("option");
@@ -140,7 +144,7 @@
       batch.appendChild(option);
     }
     batch.value = channelProfiles.some(p => p.id === old && p.logo_url) ? old :
-      (channelProfiles.some(p => p.id === safe && p.logo_url) ? safe : "bajo-mundo-studio");
+      (channelProfiles.some(p => p.id === safe && p.logo_url) ? safe : "bajo-mundo");
     await updateBrandPreview();
     await updateFullVideoPreview(true);
   }
@@ -843,6 +847,9 @@
     const alpha = Number($("brandLogoOpacity").value);
     $("brandLogoSizeValue").textContent = percent + "%";
     $("brandLogoOpacityValue").textContent = alpha + "%";
+    $("showBannerDemo").hidden = !$("brandFollowBanner").checked;
+    $("showCaptionDemo").hidden = $("brandSubtitleMode").value === "none";
+    $("showCaptionDemo").classList.toggle("clean", $("brandSubtitleStyle").value === "clean");
     $("watermarkPreviewMessage").textContent = skipped ?
       "No extra watermark will be burned in. Your existing on-video logo stays." :
       "New exports will display " + (profile?.name || "your logo") +
@@ -876,6 +883,175 @@
     }
   }
 
+
+  function cleanupInfo(message) {
+    $("cleanupInfo").textContent = message ||
+      (cleanupRegions.length + " area(s) selected. New footage is generated with these rectangles repaired before the Bajo Mundo logo and subtitles are added.");
+  }
+  function allowedCleanupBox(box) {
+    return [box.x,box.y,box.w,box.h].every(Number.isFinite) &&
+      box.x >= 0 && box.y >= 0 && box.w >= 2 && box.h >= 2 &&
+      box.w <= 65 && box.h <= 40 &&
+      box.x + box.w <= 100.001 && box.y + box.h <= 100.001;
+  }
+  function renderCleanupBoxes() {
+    const layer = $("cleanupDrawLayer");
+    layer.replaceChildren();
+    const add = (box, index, suggested=false) => {
+      const item = document.createElement("div");
+      item.className = suggested ? "cleanup-box suggested" : "cleanup-box";
+      item.style.left=box.x+"%"; item.style.top=box.y+"%";
+      item.style.width=box.w+"%"; item.style.height=box.h+"%";
+      const caption=document.createElement("span");
+      caption.textContent = (suggested?"Suggestion ":"Remove ") + (index+1);
+      item.appendChild(caption);
+      if (!suggested) {
+        const remove=document.createElement("button");
+        remove.type="button"; remove.className="cleanup-delete";
+        remove.textContent="×"; remove.setAttribute("aria-label","Remove cleanup box "+(index+1));
+        remove.addEventListener("pointerdown",event=>event.stopPropagation());
+        remove.addEventListener("click",event=>{
+          event.stopPropagation();
+          cleanupRegions.splice(index,1);
+          renderCleanupBoxes();
+          cleanupInfo();
+        });
+        item.appendChild(remove);
+      }
+      layer.appendChild(item);
+    };
+    cleanupRegions.forEach((box,index)=>add(box,index));
+    cleanupSuggestions.forEach((box,index)=>add(box,index,true));
+  }
+  function previewCleanupSource() {
+    if (cleanupVideoUrl) {
+      URL.revokeObjectURL(cleanupVideoUrl);
+      cleanupVideoUrl=null;
+    }
+    const video=$("cleanupVideo");
+    video.pause(); video.removeAttribute("src"); video.load();
+    cleanupRegions=[]; cleanupSuggestions=[]; renderCleanupBoxes();
+    $("cleanupApplySuggestions").classList.add("hidden");
+    if (!brandBatchFiles.length) {
+      $("cleanupVideoShell").classList.add("hidden");
+      $("cleanupSeekPanel").classList.add("hidden");
+      cleanupInfo("Select your videos to preview existing on-screen text, logos and stickers.");
+      $("cleanupSuggest").disabled=true;
+      return;
+    }
+    cleanupVideoUrl=URL.createObjectURL(brandBatchFiles[0]);
+    video.src=cleanupVideoUrl;
+    $("cleanupVideoShell").classList.remove("hidden");
+    $("cleanupSeekPanel").classList.remove("hidden");
+    $("cleanupSuggest").disabled=false;
+    cleanupInfo("Previewing the first selected video. Scrub the timeline and drag rectangles over old graphics. Do not cover people or important parts of the scene.");
+  }
+  function setupCleanupEditor() {
+    const video=$("cleanupVideo"),layer=$("cleanupDrawLayer"),seek=$("cleanupSeek");
+    video.addEventListener("loadedmetadata",()=>{
+      if (!video.videoWidth||!video.videoHeight) return;
+      $("cleanupVideoShell").style.aspectRatio=video.videoWidth+"/"+video.videoHeight;
+      const time=Math.min(0.35, Math.max(0, video.duration-.15));
+      if (Number.isFinite(time)) video.currentTime=time;
+    });
+    video.addEventListener("timeupdate",()=>{
+      if (Number.isFinite(video.duration)&&video.duration>0)
+        seek.value=String(video.currentTime/video.duration*100);
+    });
+    seek.addEventListener("input",()=>{
+      if(Number.isFinite(video.duration)&&video.duration>0)
+        video.currentTime=video.duration*Number(seek.value)/100;
+    });
+    $("cleanupPlay").addEventListener("click",()=>{
+      if(video.paused) video.play().catch(()=>{});
+      else video.pause();
+    });
+    function loc(event) {
+      const rect=layer.getBoundingClientRect();
+      return {x:Math.max(0,Math.min(100,(event.clientX-rect.left)/rect.width*100)),
+              y:Math.max(0,Math.min(100,(event.clientY-rect.top)/rect.height*100))};
+    }
+    layer.addEventListener("pointerdown",event=>{
+      if(event.target.closest("button") || !brandBatchFiles.length ||
+         cleanupRegions.length>=6) return;
+      event.preventDefault();video.pause();
+      const start=loc(event);
+      cleanupSuggestions=[];
+      cleanupDrag={id:event.pointerId,start,now:start};
+      layer.setPointerCapture(event.pointerId);
+      renderCleanupBoxes();
+    });
+    layer.addEventListener("pointermove",event=>{
+      if(!cleanupDrag || event.pointerId!==cleanupDrag.id) return;
+      cleanupDrag.now=loc(event);
+      const one=cleanupDrag.start,two=cleanupDrag.now;
+      renderCleanupBoxes();
+      const draft=document.createElement("div");
+      draft.className="cleanup-box draft";
+      draft.style.left=Math.min(one.x,two.x)+"%";
+      draft.style.top=Math.min(one.y,two.y)+"%";
+      draft.style.width=Math.abs(one.x-two.x)+"%";
+      draft.style.height=Math.abs(one.y-two.y)+"%";
+      layer.appendChild(draft);
+    });
+    function finish(event) {
+      if(!cleanupDrag || event.pointerId!==cleanupDrag.id) return;
+      const one=cleanupDrag.start,two=loc(event);
+      cleanupDrag=null;
+      const box={x:Math.round(Math.min(one.x,two.x)*100)/100,
+                 y:Math.round(Math.min(one.y,two.y)*100)/100,
+                 w:Math.round(Math.abs(one.x-two.x)*100)/100,
+                 h:Math.round(Math.abs(one.y-two.y)*100)/100};
+      if(allowedCleanupBox(box) &&
+         cleanupRegions.reduce((n,x)=>n+x.w*x.h,0)+box.w*box.h<=3000) {
+        cleanupRegions.push(box);
+        cleanupInfo("Area marked for cleanup. Review its placement throughout the video before generating.");
+      } else {
+        cleanupInfo("Draw a rectangle at least 2% wide and tall, max 65% width/40% height. Large masks can damage the scene.");
+      }
+      renderCleanupBoxes();
+    }
+    layer.addEventListener("pointerup",finish);
+    layer.addEventListener("pointercancel",()=>{
+      cleanupDrag=null;renderCleanupBoxes();
+    });
+    $("cleanupClear").addEventListener("click",()=>{
+      cleanupRegions=[];cleanupSuggestions=[];
+      $("cleanupApplySuggestions").classList.add("hidden");
+      renderCleanupBoxes();cleanupInfo("All removal areas cleared. Your source footage is unchanged.");
+    });
+    $("cleanupSuggest").addEventListener("click",async ()=>{
+      const file=brandBatchFiles[0];
+      if (!file) return toast("Select a video first.");
+      const button=$("cleanupSuggest");
+      button.disabled=true;
+      cleanupInfo("Analyzing a few frames for persistent on-screen text. This may miss logos; all suggested removals require your approval.");
+      try{
+        const data=new FormData();data.append("video",file,file.name);
+        const result=await (await api("/api/cleanup/suggest",{method:"POST",body:data})).json();
+        cleanupSuggestions=(result.regions||[]).filter(allowedCleanupBox).slice(0,6);
+        renderCleanupBoxes();
+        $("cleanupApplySuggestions").classList.toggle("hidden",!cleanupSuggestions.length);
+        cleanupInfo(cleanupSuggestions.length?
+          cleanupSuggestions.length+" possible text area(s) found. Inspect the boxes, then click Apply suggestions to include them. Real objects may be mistaken for graphics.":
+          "No reliable text overlays found. Scrub the video and draw over unwanted logos or captions manually.");
+      }catch(error) {
+        cleanupInfo("Automatic detection wasn't reliable: "+error.message+". Draw boxes manually.");
+      }finally{button.disabled=false}
+    });
+    $("cleanupApplySuggestions").addEventListener("click",()=>{
+      const accepted=cleanupSuggestions.slice(0,6-cleanupRegions.length);
+      for(const box of accepted) {
+        if(cleanupRegions.reduce((n,r)=>n+r.w*r.h,0)+box.w*box.h<=3000)
+          cleanupRegions.push(box);
+      }
+      cleanupSuggestions=[];
+      $("cleanupApplySuggestions").classList.add("hidden");
+      renderCleanupBoxes();
+      cleanupInfo("Suggested areas added. Check the full video before publishing; cleanup is not perfect.");
+    });
+  }
+
   function pickBrandBatchFiles(files) {
     if (brandBatchBusy) return;
     const all = Array.from(files || []);
@@ -891,10 +1067,11 @@
         (count > 3 ? " · and " + (count - 3) + " more" : "") :
       "One video or a whole batch · MP4, MOV, MKV, WEBM, M4V";
     $("brandBatchStatus").textContent = count ?
-      "Ready to brand, full-length. No cuts or automatic captions." :
+      "Ready for full-length video. Selected speech subtitles may take longer and need proofreading." :
       "Choose valid video files under the per-video size limit.";
     if (all.length > count) toast((all.length-count) + " unsupported or oversized file(s) skipped.");
     updateBrandBatchButton();
+    previewCleanupSource();
   }
   function updateBrandBatchButton() {
     const b = $("brandBatchSubmit");
@@ -909,6 +1086,8 @@
     const top = Number($("brandCropTop").value), bottom = Number($("brandCropBottom").value);
     if (![top,bottom].every(n => Number.isInteger(n) && n >= 0 && n <= 25) || top + bottom > 40)
       return toast("Crop 0–25% per edge, maximum 40% combined.");
+    if(cleanupRegions.length && !$("cleanupAuthorized").checked)
+      return toast("Confirm you own or have permission to edit the selected old graphics.");
     brandBatchBusy = true; updateBrandBatchButton();
     const queue = brandBatchFiles.slice(), total = queue.length, failures = [];
     let sent = 0, processed = 0;
@@ -921,6 +1100,13 @@
         form.append("logo_size", $("brandLogoSize").value);
         form.append("logo_opacity", $("brandLogoOpacity").value);
         form.append("logo_already_embedded", $("brandLogoAlreadyEmbedded").checked ? "true" : "false");
+        form.append("subtitle_mode", $("brandSubtitleMode").value);
+        form.append("subtitle_style", $("brandSubtitleStyle").value);
+        form.append("follow_banner", $("brandFollowBanner").checked ? "true" : "false");
+        form.append("performance_permission", $("brandPerformancePermission").value);
+        form.append("release_reference", $("brandReleaseReference").value);
+        form.append("cleanup_regions", JSON.stringify(cleanupRegions));
+        form.append("cleanup_authorized", $("cleanupAuthorized").checked ? "true":"false");
         form.append("crop_top", String(top));
         form.append("crop_bottom", String(bottom));
         form.append("rights", $("brandOnlyRights").value);
@@ -949,9 +1135,11 @@
     }
   }
   function setupBrandOnly() {
+    setupCleanupEditor();
     $("brandOnlyProfile").addEventListener("change", () => updateFullVideoPreview(true));
     for (const id of ["brandOnlyPosition", "brandLogoSize", "brandLogoOpacity",
-                      "brandLogoAlreadyEmbedded"]) {
+                      "brandLogoAlreadyEmbedded", "brandSubtitleMode",
+                      "brandSubtitleStyle", "brandFollowBanner"]) {
       $(id).addEventListener("input", () => updateFullVideoPreview(false));
       $(id).addEventListener("change", () => updateFullVideoPreview(false));
     }

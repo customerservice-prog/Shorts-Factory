@@ -34,7 +34,7 @@ curl -fsS -H "X-Access-Key: $TOKEN" "$URL/api/brands" > "$DIR/brands.json"
 python - "$DIR/brands.json" <<'PY'
 import json,sys
 brands=json.load(open(sys.argv[1]))
-assert brands["default"] == "bajo-mundo-studio"
+assert brands["default"] == "bajo-mundo"
 assert any(x["id"]=="bajo-mundo" for x in brands["brands"])
 assert any(x["id"]=="bajo-mundo-studio" for x in brands["brands"])
 PY
@@ -228,7 +228,7 @@ job = json.load(open(sys.argv[2]))
 assert len(job["clips"]) == 2, job
 assert job["review"]["monetization_guaranteed"] is False
 assert job["clips"][0]["technical"]["verified"] is True
-assert job["brand_id"] == "bajo-mundo-studio"
+assert job["brand_id"] == "bajo-mundo"
 with zipfile.ZipFile(sys.argv[1]) as zipped:
     assert "clip_01.mp4" in zipped.namelist()
     assert "clip_01_focus_left_01.mp4" in zipped.namelist()
@@ -251,16 +251,20 @@ code="$(curl -sS -H "X-Access-Key: $TOKEN" -o /dev/null -w '%{http_code}' \
   "$URL/api/brand-only")"
 test "$code" = "400"
 curl -fsS -H "X-Access-Key: $TOKEN" \
-  -F "video=@$DIR/source.mp4" -F "brand_id=bajo-mundo-studio" \
+  -F "video=@$DIR/source.mp4" -F "brand_id=bajo-mundo" \
   -F "rights_acknowledged=true" -F "logo_position=top_right" \
   -F "logo_size=33" -F "logo_opacity=90" \
+  -F "subtitle_mode=none" -F "subtitle_style=show" \
+  -F "follow_banner=true" -F "performance_permission=unknown" \
+  -F 'cleanup_regions=[{"x":5,"y":5,"w":20,"h":10}]' \
+  -F "cleanup_authorized=true" \
   -F "rights=unknown" -F "audio_rights=unknown" \
   "$URL/api/brand-only" > "$DIR/brand-submit.json"
 brand_id="$(python - "$DIR/brand-submit.json" <<'PY'
 import json,sys
 job=json.load(open(sys.argv[1]))
 assert job["mode"] == "brand_only"
-assert job["brand_id"] == "bajo-mundo-studio"
+assert job["brand_id"] == "bajo-mundo"
 assert job["logo_size"] == 33
 assert job["logo_opacity"] == 90
 print(job["id"])
@@ -292,8 +296,11 @@ assert job["zip_file"] is None, "Do not duplicate MP4 storage for batch branding
 assert len(job["clips"]) == 1
 assert job["clips"][0]["technical"]["verified"]
 assert job["clips"][0]["technical"]["full_length"]
+assert job["clips"][0]["technical"]["follow_banner"]
+assert job["clips"][0]["technical"]["cleanup_region_count"] == 1
 assert job["clips"][0]["technical"]["logo_added"]
 assert job["clips"][0]["technical"]["logo_size"] == 33
+assert job["clips"][0]["captions"] is False
 assert job["review"]["monetization_guaranteed"] is False
 assert job["clips"][0]["captions"] is False
 assert abs(job["clips"][0]["length"] - 4) < 1.0
@@ -311,4 +318,13 @@ assert (video["width"],video["height"])==(320,180),video
 assert abs(float(media["format"]["duration"])-4)<.6
 PY
 
+# OCR suggestions require authentication and never modify the source.
+curl -fsS --max-time 90 -H "X-Access-Key: $TOKEN" \
+  -F "video=@$DIR/source.mp4" "$URL/api/cleanup/suggest" > "$DIR/suggestions.json"
+python - "$DIR/suggestions.json" <<'PY'
+import json,sys
+data=json.load(open(sys.argv[1]))
+assert data["requires_confirmation"] is True
+assert isinstance(data["regions"], list)
+PY
 echo "Shorts Factory container smoke test passed."

@@ -438,3 +438,57 @@ body.has-results:not(.show-editor) .brand-quick{display:none}
 .watermark-avoid-duplicate{display:flex;align-items:flex-start;gap:8px;font-size:10.5px;
   line-height:1.55;color:#aec2c5;margin:2px 0 8px}
 .watermark-avoid-duplicate input{flex-shrink:0;margin:3px 0 0;accent-color:#b6f466}
+
+
+/* V11: original-logo music-show presentation / native speech captions. */
+.brand-show-style{display:grid;gap:8px;margin:10px 0;padding:15px;background:#17232e;
+ border:1px solid #415566;border-radius:11px}
+.brand-show-style>strong{font-size:13px;color:#e8f7ed}
+.brand-show-style>small,.brand-show-style>p{font-size:10.5px;line-height:1.6;color:#abc0c7;margin:0}
+.brand-show-style>label:not(.show-follow-toggle){font-size:11px;color:#c6d5d9;font-weight:750;margin-top:4px}
+.brand-show-style select{color:#f1f8f5;background:#0c151e;border:1px solid #4c6270;
+ width:100%;border-radius:9px;padding:10px;min-height:41px;font-size:11px}
+.show-follow-toggle{display:flex;gap:9px;align-items:flex-start;color:#d0e3d6;
+ font-size:11px;line-height:1.55;padding:8px 0}
+.show-follow-toggle input{accent-color:#c7fa5e;flex-shrink:0;margin-top:3px}
+.show-banner-demo{position:absolute;z-index:3;left:10px;top:43px;max-width:60%;
+ font-size:10px;letter-spacing:.05em;color:#f2f1e8;font-weight:950;
+ background:#141923dd;border:1px solid #eea943;border-radius:7px;padding:5px 9px;
+ text-shadow:0 1px 1px #000}
+.show-caption-demo{position:absolute;z-index:3;bottom:21px;left:13%;width:74%;
+ font-weight:900;line-height:1.35;text-align:center;font-size:11px;color:#ffe56e;
+ text-shadow:0 1px 3px #000,0 1px 1px #000;
+ padding:6px 4px;border-radius:5px;background:#0b0d12bf}
+.show-caption-demo.clean{color:#fff}
+.show-banner-demo[hidden],.show-caption-demo[hidden]{display:none}
+
+
+/* V12: visual overlay cleanup / before new Bajo Mundo branding. */
+.cleanup-graphics{padding:15px;background:#0f1b23;border:1px solid #567078;
+ border-radius:13px;margin:12px 0;display:grid;gap:11px}
+.cleanup-head{display:grid;gap:5px}
+.cleanup-head strong{font-size:14px;color:#eef7f6}
+.cleanup-head small,.cleanup-limit,.cleanup-graphics>p{font-size:11px;color:#b4c6cd;line-height:1.6;margin:0}
+.cleanup-video-shell{position:relative;width:100%;max-height:520px;min-height:120px;overflow:hidden;
+ background:#050708;border:1px solid #5a6e78;border-radius:12px;touch-action:none;margin:0 auto}
+.cleanup-video-shell video{display:block;width:100%;height:100%;position:absolute;inset:0;object-fit:fill}
+.cleanup-draw-layer{position:absolute;inset:0;cursor:crosshair;touch-action:none;user-select:none}
+.cleanup-box{position:absolute;border:2px solid #ffcc65;background:#ed913e30;box-shadow:0 0 0 1px #211610a8 inset;
+ pointer-events:none;border-radius:3px;display:flex;justify-content:space-between;align-items:flex-start}
+.cleanup-box>span{background:#1b1e24ed;color:#ffeac6;font-size:9px;line-height:1.3;font-weight:800;padding:3px 5px}
+.cleanup-box .cleanup-delete{pointer-events:auto;border:0;background:#b93f36;color:white;font-size:14px;
+ width:22px;height:22px;cursor:pointer}
+.cleanup-box.draft{border-style:dashed;border-color:#bdf877;background:#bdf87722}
+.cleanup-box.suggested{border-style:dashed;border-color:#71d5fa;background:#70d3f32b}
+.cleanup-box.suggested>span{color:#d4fbff}
+.cleanup-seek{display:flex;gap:9px;align-items:center}
+.cleanup-seek button,.cleanup-commands button{background:#1b2b35;color:#eff7f2;
+ border:1px solid #537078;border-radius:8px;font-size:11px;font-weight:800;padding:10px 11px;cursor:pointer}
+.cleanup-commands{display:flex;gap:8px;flex-wrap:wrap}
+.cleanup-commands button:first-child{color:#c9f6bb}
+.cleanup-commands button:disabled{opacity:.5;cursor:not-allowed}
+.cleanup-seek input{width:100%;accent-color:#c6fa63}
+.cleanup-authorized{display:flex;gap:10px;color:#d4e1d8;font-size:11px;line-height:1.6}
+.cleanup-authorized input{accent-color:#ceff6d;align-self:flex-start;margin-top:3px}
+.cleanup-graphics .hidden{display:none!important}
+@media(max-width:600px){.cleanup-graphics{padding:12px}.cleanup-commands button{flex:1 1 43%}.cleanup-video-shell{max-height:460px}}

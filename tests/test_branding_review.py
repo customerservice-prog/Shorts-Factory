@@ -67,8 +67,8 @@ class BrandLogoTests(unittest.TestCase):
                     self.assertEqual(image.getchannel("A").getextrema(), (0, 255))
                     self.assertGreater(asset.stat().st_size, 7000)
         brands = branding.list_brands()
-        self.assertEqual(brands[0]["id"], "bajo-mundo-studio")
-        self.assertEqual(brands[1]["id"], "bajo-mundo")
+        self.assertEqual(brands[0]["id"], "bajo-mundo")
+        self.assertEqual(brands[1]["id"], "bajo-mundo-studio")
 
 if __name__=="__main__":
     unittest.main()

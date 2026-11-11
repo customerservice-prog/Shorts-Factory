@@ -173,10 +173,10 @@ def brand_path(brand_id):
 
 
 def list_brands():
-    result = [{"id": "bajo-mundo-studio", "name": "Bajo Mundo TV · Studio watermark",
-               "built_in": True, "logo_url": "/api/brands/bajo-mundo-studio/logo"},
-              {"id": "bajo-mundo", "name": "Bajo Mundo TV · Original logo",
+    result = [{"id": "bajo-mundo", "name": "Bajo Mundo TV · Original logo",
                "built_in": True, "logo_url": "/api/brands/bajo-mundo/logo"},
+              {"id": "bajo-mundo-studio", "name": "Bajo Mundo TV · Alternative watermark",
+               "built_in": True, "logo_url": "/api/brands/bajo-mundo-studio/logo"},
               {"id": "none", "name": "No logo", "built_in": True, "logo_url": None}]
     if not BRAND_DIR.is_dir():
         return result

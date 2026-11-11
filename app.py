@@ -5,6 +5,7 @@ import zipfile
 from copy import deepcopy
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -20,6 +21,9 @@ from pipeline import make_shorts, generate_thumbnail, probe_video, render_clip
 from branding import BRAND_DIR, PROFILE_ID, brand_path, list_brands, save_brand
 from review import PLATFORMS, AUDIO_RIGHTS, ORIGINALITY, inspect_export, risk_review
 from brand_only import brand_full_video, POSITIONS, probe_media
+from show_style import create_subtitle_file, create_follow_banner
+from overlay_cleanup import normalize_masks, suggest_text_masks
+from pipeline import transcribe
 
 BASE = Path(os.getenv("DATA_DIR", "./data")).resolve()
 BASE.mkdir(parents=True, exist_ok=True)
@@ -150,12 +154,54 @@ def process_brand_only(job_id: str):
         outputs.mkdir(exist_ok=True)
         target = outputs / "clip_01.mp4"
         before = probe_media(job["source"])
+        captions_path = None
+        follow_banner = None
+        language = ""
+        words = []
+        processing_warnings = []
+        if job.get("subtitle_mode") == "auto":
+            if not before["has_audio"]:
+                processing_warnings.append("Source has no audio; automatic subtitles were skipped.")
+            else:
+                update_job(job_id, status="analyzing", progress=13,
+                           note="Detecting speech for synchronized captions (not changing footage)...")
+                try:
+                    words, language = transcribe(Path(job["source"]))
+                    if words:
+                        candidate = folder / "show_captions.ass"
+                        count = create_subtitle_file(
+                            candidate, words, before["width"], before["height"],
+                            style=job.get("subtitle_style", "show")
+                        )
+                        if count:
+                            captions_path = candidate
+                        else:
+                            processing_warnings.append("No usable speech timestamps; captions not added.")
+                    else:
+                        processing_warnings.append(
+                            "No reliable spoken words detected; left original audio unchanged without invented captions."
+                        )
+                    if language and language != "es":
+                        processing_warnings.append(
+                            "Detected language: " + language +
+                            ". Captions reflect detected speech; no Spanish translation was performed."
+                        )
+                except Exception:
+                    processing_warnings.append(
+                        "Automatic subtitles were unavailable. Video was still exported without invented captions."
+                    )
+        if job.get("follow_banner"):
+            follow_banner = create_follow_banner(folder / "follow_banner.png")
+        update_job(job_id, status="rendering", progress=46,
+                   note="Applying original channel logo and optional show-style graphics...")
         technical = brand_full_video(
             job["source"], target, job["logo"],
             position=job["logo_position"],
             crop_top=job["crop_top"], crop_bottom=job["crop_bottom"],
             logo_size=job.get("logo_size", 30),
-            logo_opacity=job.get("logo_opacity", 100)
+            logo_opacity=job.get("logo_opacity", 100),
+            subtitle_file=captions_path, follow_banner=follow_banner,
+            cleanup_regions=job.get("cleanup_regions", [])
         )
         update_job(job_id, progress=93, note="Verifying full video duration and audio...")
         clip = {
@@ -163,21 +209,43 @@ def process_brand_only(job_id: str):
             "title": Path(job["filename"]).stem[:120],
             "start": 0, "end": round(before["duration"], 3),
             "length": round(before["duration"], 3),
-            "highlight_score": 0, "captions": False,
+            "highlight_score": 0, "captions": technical["captions_added"],
+            "subtitle_language": language if technical["captions_added"] else None,
+            "captions_need_review": technical["captions_added"],
             "layout": "original", "technical": technical,
             "full_length": True, "brand_id": job["brand_id"]
         }
-        review = risk_review(job, [clip], [], "", before["duration"], before["has_audio"])
+        review = risk_review(job, [clip], words, language, before["duration"], before["has_audio"])
         clip["review"] = review["clip_reviews"][0]
         review["source_findings"].append({
-            "level": "review", "title": "Branding is not monetization clearance",
-            "detail": "The full video was branded, not newly created. Confirm visual and audio rights, original contribution and Facebook account eligibility before posting."
+            "level": "review", "title": "Own-camera footage is not automatically music-cleared",
+            "detail": "Even when you filmed it, the performer, songwriters, publishers or labels may control music and performance rights. Written permission and platform review may still be required."
         })
+        if job.get("performance_permission", "unknown") == "unknown":
+            review["status"] = "high_risk"
+            review["source_findings"].append({
+                "level": "high", "title": "Artist/performance release not confirmed",
+                "detail": "Get permission for commercial publishing and editing from the relevant performer/rightsholder; also verify recording and composition rights separately."
+            })
+        if technical.get("cleanup_region_count", 0):
+            review["source_findings"].append({
+                "level": "review",
+                "title": "Old overlays interpolated; check the full video",
+                "detail": "Interpolated pixels can smear moving scenes or leave text remnants. Watch for distorted faces and rights/attribution obligations before publishing."
+            })
+        if technical["captions_added"]:
+            review["source_findings"].append({
+                "level": "review", "title": "Proofread auto captions before posting",
+                "detail": "Speech recognition can mishear Dominican slang, names and music. Watch the whole video and correct mistakes before distribution."
+            })
         update_job(job_id, status="completed", progress=100,
                    note="Full-length branded video ready. Originals preserved.",
-                   clips=[clip], review=review, zip_file=None, transcript="",
+                   clips=[clip], review=review, zip_file=None,
+                   transcript=" ".join(w["text"] for w in words)[:60000],
                    clip_length=round(before["duration"], 3),
-                   warnings=["Bajo Mundo TV branding does not establish rights or Facebook monetization eligibility."])
+                   warnings=processing_warnings + [
+                       "Filming, adding subtitles, or applying a logo does not establish music rights or Facebook monetization eligibility."
+                   ])
     except Exception as exc:
         update_job(job_id, status="failed", progress=0,
                    note="Unable to brand the video: " + str(exc)[:350])
@@ -186,11 +254,18 @@ def process_brand_only(job_id: str):
 @app.post("/api/brand-only", status_code=202)
 async def submit_brand_only(
     video: UploadFile = File(...),
-    brand_id: str = Form("bajo-mundo-studio"),
+    brand_id: str = Form("bajo-mundo"),
     logo_position: str = Form("top_right"),
     logo_size: int = Form(30),
     logo_opacity: int = Form(100),
     logo_already_embedded: bool = Form(False),
+    subtitle_mode: str = Form("none"),
+    subtitle_style: str = Form("show"),
+    follow_banner: bool = Form(False),
+    performance_permission: str = Form("unknown"),
+    release_reference: str = Form(""),
+    cleanup_regions: str = Form("[]"),
+    cleanup_authorized: bool = Form(False),
     crop_top: int = Form(0),
     crop_bottom: int = Form(0),
     rights: str = Form("unknown"),
@@ -204,6 +279,18 @@ async def submit_brand_only(
         raise HTTPException(400, "Acknowledge that branding does not grant monetization or reposting rights.")
     if logo_position not in POSITIONS:
         raise HTTPException(400, "Choose a valid logo position.")
+    if subtitle_mode not in ("none", "auto") or subtitle_style not in ("show", "clean"):
+        raise HTTPException(400, "Unsupported show subtitle settings.")
+    if performance_permission not in ("unknown", "written", "not_applicable"):
+        raise HTTPException(400, "Invalid performance-rights selection.")
+    if len(release_reference) > 300:
+        raise HTTPException(400, "Release reference is too long.")
+    try:
+        masks = normalize_masks(cleanup_regions)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if masks and not cleanup_authorized:
+        raise HTTPException(400, "Confirm you may edit the selected old graphics.")
     if not (15 <= logo_size <= 40 and 60 <= logo_opacity <= 100):
         raise HTTPException(400, "Watermark size or opacity is outside safe limits.")
     if not (0 <= crop_top <= 25 and 0 <= crop_bottom <= 25 and
@@ -252,6 +339,12 @@ async def submit_brand_only(
             "logo_position": logo_position,
             "logo_size": logo_size, "logo_opacity": logo_opacity,
             "logo_already_embedded": logo_already_embedded,
+            "subtitle_mode": subtitle_mode, "subtitle_style": subtitle_style,
+            "follow_banner": follow_banner,
+            "performance_permission": performance_permission,
+            "release_reference": release_reference.strip(),
+            "cleanup_regions": masks,
+            "cleanup_authorized": bool(cleanup_authorized),
             "crop_top": crop_top, "crop_bottom": crop_bottom,
             "source": str(source), "logo": str(logo_snapshot) if logo_snapshot else None,
             "review": None, "clips": [], "warnings": [],
@@ -264,6 +357,26 @@ async def submit_brand_only(
     except Exception:
         shutil.rmtree(folder, ignore_errors=True)
         raise
+
+
+@app.post("/api/cleanup/suggest")
+async def suggest_old_graphic_areas(
+    video: UploadFile = File(...),
+    x_access_key: str | None = Header(default=None),
+):
+    """Suggest likely text regions only; never remove without review."""
+    protect(x_access_key)
+    suffix = Path(video.filename or "").suffix.lower()
+    if suffix not in ALLOWED_VIDEOS:
+        raise HTTPException(400, "Choose MP4, MOV, MKV, WEBM or M4V.")
+    with tempfile.TemporaryDirectory(dir=str(BASE)) as td:
+        source = Path(td) / ("sample" + suffix)
+        await save_upload(video, source, MAX_UPLOAD)
+        try:
+            info = probe_media(source)
+            return suggest_text_masks(source, info["duration"])
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise HTTPException(422, "Analysis unavailable; mark unwanted graphics manually.") from exc
 
 
 @app.get("/healthz")
@@ -283,7 +396,7 @@ def config():
 @app.get("/api/brands")
 def get_brands(x_access_key: str | None = Header(default=None)):
     protect(x_access_key)
-    return {"brands": list_brands(), "default": "bajo-mundo-studio"}
+    return {"brands": list_brands(), "default": "bajo-mundo"}
 
 
 @app.get("/api/brands/{brand_id}/logo")
@@ -371,7 +484,7 @@ async def create_job(
     layout: str = Form(default="fill"),
     captions: str = Form(default="pop"),
     brand_name: str = Form(default=""),
-    brand_id: str = Form(default="bajo-mundo-studio"),
+    brand_id: str = Form(default="bajo-mundo"),
     cover_old_brand: str = Form(default="none"),
     rights: str = Form(default="unknown"),
     audio_rights: str = Form(default="unknown"),
