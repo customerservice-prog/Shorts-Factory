@@ -633,7 +633,10 @@
     $("resultsCount").textContent = (job.clips || []).length + (fullVideo ? " video" : " clips");
     $("stageQueueCount").textContent = (job.clips || []).length + (fullVideo ? " video" : " clips");
     $("resultsSource").textContent = job.filename;
-    $("resultsTotal").textContent = fullVideo ? "Entire video preserved" : (job.clips || []).length + " finished edits";
+    $("resultsTotal").textContent = fullVideo ?
+      (job.cleanup_status === "needs_visual_review" ?
+        "Full video · old graphics NEED REVIEW" : "Entire video preserved") :
+      (job.clips || []).length + " finished edits";
     $("warnings").innerHTML = (job.warnings || []).map(w => '<div class="warning">' + esc(w) + '</div>').join("");
     renderPublishingReview(job);
     $("clipsGrid").innerHTML = (job.clips || []).map((clip,i) => buildClipCard(job,clip,i)).join("");
