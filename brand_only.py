@@ -29,7 +29,8 @@ def probe_media(path):
 
 
 def brand_full_video(source, destination, logo, *, position="top_right",
-                     crop_top=0, crop_bottom=0, logo_size=30, logo_opacity=100):
+                     crop_top=0, crop_bottom=0, logo_size=30, logo_opacity=100,
+                     subtitle_file=None, follow_banner=None):
     """Preserve the source's complete timeline, audio and native frame geometry.
 
     Optional edge crops remove portions of the picture, not the duration.
@@ -37,7 +38,11 @@ def brand_full_video(source, destination, logo, *, position="top_right",
     platform eligibility decisions or downloads from third-party services.
     """
     source, destination = Path(source), Path(destination)
+    subtitle_file = Path(subtitle_file) if subtitle_file else None
+    follow_banner = Path(follow_banner) if follow_banner else None
     logo = Path(logo) if logo is not None else None
+    if (subtitle_file and not subtitle_file.is_file()) or (follow_banner and not follow_banner.is_file()):
+        raise ValueError("Show-style graphic or subtitle file is missing")
     if not source.is_file() or (logo is not None and not logo.is_file()):
         raise ValueError("Source video or selected channel logo is unavailable")
     if type(logo_size) is not int or not 15 <= logo_size <= 40:
@@ -64,22 +69,34 @@ def brand_full_video(source, destination, logo, *, position="top_right",
         # Crop after decoding; keep the video and audio timelines untouched.
         crop_filter = (f"crop=iw:trunc(ih*{(100-crop_top-crop_bottom)/200:.6f})*2:"
                        f"0:trunc(ih*{crop_top/200:.6f})*2,")
-    vf = (f"[0:v]{crop_filter}scale=trunc(iw/2)*2:trunc(ih/2)*2,"
-          "setsar=1[base]")
+    filters = [f"[0:v]{crop_filter}scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[base]"]
+    current = "base"
+    inputs = ["-i", str(source)]
+    next_input = 1
     if logo is not None:
-        vf += (f";[1:v]format=rgba,scale={logo_width}:-2:flags=lanczos,"
-               f"colorchannelmixer=aa={logo_opacity/100:.2f}[brand];"
-               f"[base][brand]overlay={x}:{y}:eof_action=repeat:format=auto,"
-               "format=yuv420p[outv]")
-    else:
-        vf += ";[base]format=yuv420p[outv]"
+        inputs += ["-i", str(logo)]
+        filters += [f"[{next_input}:v]format=rgba,scale={logo_width}:-2:flags=lanczos,"
+                    f"colorchannelmixer=aa={logo_opacity/100:.2f}[brand]",
+                    f"[{current}][brand]overlay={x}:{y}:eof_action=repeat:format=auto[branded]"]
+        current = "branded"
+        next_input += 1
+    if follow_banner is not None:
+        inputs += ["-i", str(follow_banner)]
+        banner_width = max(180, min(900, int(before["width"] * .52)))
+        follow_x = "W-w-" + str(margin) if position.endswith("left") else str(margin)
+        filters += [f"[{next_input}:v]format=rgba,scale={banner_width}:-2:flags=lanczos[cta]",
+                    f"[{current}][cta]overlay={follow_x}:{margin}:"
+                    "eof_action=repeat:enable='lt(t,3.0)'[with_cta]"]
+        current = "with_cta"
+    if subtitle_file is not None:
+        # Files are generated under application-owned hex job directories.
+        filters += [f"[{current}]ass=filename={subtitle_file}[captioned]"]
+        current = "captioned"
+    filters += [f"[{current}]format=yuv420p[outv]"]
+    vf = ";".join(filters)
     command = [
         "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
-        "-i", str(source),
-    ]
-    if logo is not None:
-        command += ["-i", str(logo)]
-    command += [
+        *inputs,
         "-filter_complex", vf, "-map", "[outv]", "-map", "0:a:0?",
         "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1",
         "-c:v", "libx264", "-preset", os.getenv("BRAND_FFMPEG_PRESET", "veryfast"),
@@ -103,7 +120,8 @@ def brand_full_video(source, destination, logo, *, position="top_right",
             "duration": round(after["duration"], 3),
             "original_duration": round(before["duration"], 3),
             "original_width": before["width"], "original_height": before["height"],
-            "full_length": True, "captions_added": False,
+            "full_length": True, "captions_added": subtitle_file is not None,
+            "follow_banner": follow_banner is not None,
             "logo_added": logo is not None, "logo_size": logo_size if logo else 0,
             "logo_opacity": logo_opacity if logo else 0,
             "size_bytes": destination.stat().st_size
