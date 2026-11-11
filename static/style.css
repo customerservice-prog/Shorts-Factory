@@ -392,6 +392,11 @@ body.has-results .studio-hero{display:none}
 .brand-quick-controls>label{font-size:11px;font-weight:750;color:#c4d5d6}
 .brand-quick-controls>select,.brand-optional select,.brand-optional input{color:#f2f8f5;font-size:12px;background:#0d141c;border:1px solid #405663;border-radius:9px;min-height:40px;padding:9px 10px;width:100%}
 .brand-quick-controls>select{margin-bottom:8px}
+.brand-custom-upload{display:flex;flex-direction:column;align-items:flex-start;gap:6px;margin:-3px 0 9px}
+.brand-custom-upload .brand-quick-pick{margin-top:0}
+.brand-custom-upload .brand-quick-pick:disabled{opacity:.6;cursor:wait}
+.brand-custom-upload p{color:#b9ccd3;font-size:10.5px;line-height:1.55;margin:0}
+
 .brand-optional{background:#16242b;border:1px solid #31434c;border-radius:9px;margin-top:6px;padding:12px}
 .brand-optional summary{cursor:pointer;color:#caedb9;font-size:11px;font-weight:850;line-height:1.5}
 .brand-optional>p{font-size:10px;color:#abb7c4;line-height:1.6;margin:12px 0 0}
