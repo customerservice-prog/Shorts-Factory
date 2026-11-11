@@ -67,7 +67,7 @@
           <div class="results-heading">
             <div>
               <div class="eyebrow"><span class="ready-dot"></span> YOUR EDITING STUDIO · EXPORTS READY</div>
-              <h2>Meet your new shorts <span class="results-count" id="resultsCount">5 clips</span></h2>
+              <h2><span id="resultsTitle">Meet your new shorts</span> <span class="results-count" id="resultsCount">5 clips</span></h2>
               <p>See the actual video frames, review each edit, and download only what you like.</p>
             </div>
             <div class="result-actions">
@@ -94,7 +94,7 @@
                 <div><div class="stage-meta-kicker">NOW PREVIEWING <span id="stagePosition">01 / 05</span></div><h3 id="stageClipTitle">Choose a clip to preview</h3><p id="stageClipDetails">Review the clip before sharing.</p></div>
                 <div class="stage-meta-actions"><button type="button" class="subtle-btn" id="stageCopy">⧉ Copy caption</button><button type="button" class="subtle-btn" id="stageCoverDownload">↓ Save cover JPG</button><button type="button" class="primary-small-btn" id="stageDownload">↓ Download MP4</button></div>
               </div>
-              <div class="reframe-tool" aria-label="Fix clip framing">
+              <div class="reframe-tool" id="reframeTool" aria-label="Fix clip framing">
                 <div class="reframe-heading">
                   <div><strong>Fix the split-screen look</strong><small>Create a fresh crop from the saved original. Your existing export stays unchanged.</small></div>
                   <span>RE-EDIT</span>
@@ -118,7 +118,7 @@
               <div class="stage-side-footer"><span>✧</span> Each thumbnail is a real frame from its exported video, not a placeholder.</div>
             </aside>
           </div>
-          <div class="gallery-heading"><div><h3>All clips</h3><p>Choose a thumbnail to watch the actual edit.</p></div><span class="gallery-hint">9:16 · FULL HD</span></div>
+          <div class="gallery-heading"><div><h3 id="galleryTitle">All clips</h3><p>Choose a thumbnail to watch the actual edit.</p></div><span class="gallery-hint">9:16 · FULL HD</span></div>
           <div class="clips-grid" id="clipsGrid"></div>
           <details id="reviewPanel" class="publishing-review" aria-label="Publishing rights and quality review">
             <summary class="review-title">
