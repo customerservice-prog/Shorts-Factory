@@ -7,7 +7,7 @@
   <title>Shorts Factory — AI Clip Studio</title>
   <meta name="description" content="Turn long videos into captioned, branded, vertical Shorts with a private editing studio.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=9">
+  <link rel="stylesheet" href="/style.css?v=10">
 </head>
 <body>
   <div class="app-shell">
@@ -150,7 +150,25 @@
             </div>
             <div class="brand-quick-controls">
               <label for="brandOnlyProfile">Apply this channel logo</label>
-              <select id="brandOnlyProfile"><option value="bajo-mundo">Bajo Mundo TV · default</option></select>
+              <select id="brandOnlyProfile"><option value="bajo-mundo-studio">Bajo Mundo TV · Studio watermark</option><option value="bajo-mundo">Bajo Mundo TV · Original</option></select>
+              <div class="watermark-preview" aria-label="Live video watermark preview">
+                <div class="watermark-demo" id="watermarkDemo">
+                  <span class="watermark-demo-label">LIVE LOGO PREVIEW</span>
+                  <img id="watermarkPreviewImg" alt="Selected Bajo Mundo TV watermark" hidden>
+                  <span class="watermark-demo-scene">▶ &nbsp; VIDEO</span>
+                </div>
+                <p id="watermarkPreviewMessage">Preview how the selected watermark will look at video size.</p>
+              </div>
+              <div class="watermark-settings">
+                <label for="brandLogoSize">Logo size <output id="brandLogoSizeValue">30%</output></label>
+                <input id="brandLogoSize" type="range" min="15" max="40" step="1" value="30">
+                <label for="brandLogoOpacity">Logo visibility <output id="brandLogoOpacityValue">100%</output></label>
+                <input id="brandLogoOpacity" type="range" min="60" max="100" step="5" value="100">
+              </div>
+              <label class="watermark-avoid-duplicate">
+                <input id="brandLogoAlreadyEmbedded" type="checkbox">
+                This video already contains the correct Bajo Mundo TV logo — don't add a second copy
+              </label>
               <label for="brandOnlyPosition">Logo placement</label>
               <select id="brandOnlyPosition"><option value="top_right">Top right (recommended)</option><option value="top_left">Top left</option><option value="bottom_right">Bottom right</option><option value="bottom_left">Bottom left</option></select>
               <details class="brand-optional">
@@ -219,7 +237,7 @@
             <div class="option-heading branding-header"><span class="brand-label-icon">✦</span><h2>Your branding</h2><span class="subtle-optional">Optional</span></div>
             <div class="channel-branding">
               <label for="brandProfile">Channel profile</label>
-              <div class="select-wrap"><select id="brandProfile"><option value="bajo-mundo" selected>Bajo Mundo TV · default logo</option><option value="none">No logo</option><option value="new">+ Add another channel</option></select></div>
+              <div class="select-wrap"><select id="brandProfile"><option value="bajo-mundo-studio" selected>Bajo Mundo TV · Studio watermark</option><option value="bajo-mundo">Bajo Mundo TV · Original</option><option value="none">No logo</option><option value="new">+ Add another channel</option></select></div>
               <div class="brand-preview-card"><div class="brand-preview-thumb"><img id="brandPreviewImg" alt="Selected channel logo" hidden><span id="brandPreviewFallback">TV</span></div><div><strong id="brandPreviewName">Bajo Mundo TV</strong><small id="brandPreviewDescription">Automatically placed on new exports</small></div></div>
               <div id="newBrandControls" class="new-brand-controls hidden">
                 <label for="newChannelName">New channel name</label>
@@ -261,6 +279,6 @@
   </div>
   <div class="modal-backdrop hidden" id="authModal"><form class="auth-modal" id="authForm"><div class="auth-icon">▶</div><h2>Welcome to your studio</h2><p>Enter the private password configured for your Shorts Factory server.</p><label for="accessPassword">Access password</label><input type="password" id="accessPassword" autocomplete="current-password" placeholder="Your studio password" required><button type="submit" class="generate-button">Unlock studio <span>↗</span></button><span class="auth-error" id="authError"></span></form></div>
   <div class="toast hidden" id="toast" role="status"></div>
-  <script src="/app.js?v=9" defer></script>
+  <script src="/app.js?v=10" defer></script>
 </body>
 </html>
