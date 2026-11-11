@@ -1,3 +1,4 @@
+import asyncio
 import hmac
 import json
 import os
@@ -14,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from pipeline import make_shorts, generate_thumbnail, probe_video, render_clip
@@ -23,6 +24,7 @@ from review import PLATFORMS, AUDIO_RIGHTS, ORIGINALITY, inspect_export, risk_re
 from brand_only import brand_full_video, POSITIONS, probe_media
 from show_style import create_subtitle_file, create_follow_banner
 from overlay_cleanup import normalize_masks, suggest_text_masks
+from cleanup_preview import preview_frame
 from pipeline import transcribe
 
 BASE = Path(os.getenv("DATA_DIR", "./data")).resolve()
@@ -473,6 +475,51 @@ def clean_rebrand_saved_source(
     except Exception:
         shutil.rmtree(folder, ignore_errors=True)
         raise
+
+
+@app.post("/api/cleanup/preview")
+async def processed_cleanup_frame(
+    frame: UploadFile = File(...),
+    cleanup_regions: str = Form("[]"),
+    cleanup_authorized: bool = Form(False),
+    brand_id: str = Form("bajo-mundo"),
+    logo_position: str = Form("top_right"),
+    logo_size: int = Form(24),
+    logo_opacity: int = Form(100),
+    logo_already_embedded: bool = Form(False),
+    crop_top: int = Form(0),
+    crop_bottom: int = Form(0),
+    x_access_key: str | None = Header(default=None),
+):
+    """Generate a real after-cleanup still from the selected browser video frame.
+
+    Not an endorsement of source rights, quality or perfect reconstruction.
+    Images are discarded after rendering; no uploaded video is stored.
+    """
+    protect(x_access_key)
+    try:
+        masks=normalize_masks(cleanup_regions)
+    except ValueError as exc:
+        raise HTTPException(400,str(exc)) from exc
+    if masks and not cleanup_authorized:
+        raise HTTPException(400,"Confirm you have permission to modify the selected graphics.")
+    try:
+        logo=None if logo_already_embedded else brand_path(brand_id)
+        if logo is None and not logo_already_embedded:
+            raise ValueError("No logo selected")
+        data=await frame.read(5_000_001)
+        result=await asyncio.to_thread(
+            preview_frame,data,masks,logo,position=logo_position,
+            logo_size=logo_size,logo_opacity=logo_opacity,
+            crop_top=crop_top,crop_bottom=crop_bottom
+        )
+    except (ValueError,OSError,RuntimeError) as exc:
+        raise HTTPException(422,str(exc)[:240]) from exc
+    return Response(
+        result,media_type="image/jpeg",
+        headers={"Cache-Control":"no-store","X-Cleanup-Applied":str(len(masks)),
+                 "X-Preview-Notice":"Single frame, not a full-video quality certification"}
+    )
 
 
 @app.post("/api/cleanup/suggest")
