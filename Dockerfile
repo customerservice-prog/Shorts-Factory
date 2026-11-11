@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
-COPY app.py pipeline.py branding.py review.py /app/
+COPY app.py pipeline.py branding.py review.py brand_only.py /app/
 COPY static /app/static
 COPY entrypoint.sh /app/entrypoint.sh
 RUN groupadd --gid 10001 studio && useradd --uid 10001 --gid studio --create-home studio \
