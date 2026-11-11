@@ -322,7 +322,7 @@ async def create_job(
 
 
 
-def _reframe_worker(job_id: str, source_filename: str, focus: str, output_name: str):
+def _reframe_worker(job_id: str, source_filename: str, focus: str, output_name: str, clean_settings=None):
     """Non-destructive edit of an existing saved clip from its original footage."""
     folder = job_dir(job_id)
     out_dir = folder / "outputs"
@@ -340,13 +340,21 @@ def _reframe_worker(job_id: str, source_filename: str, focus: str, output_name: 
         captions_name = "captions_" + source_filename[5:7] + ".ass"
         captions_path = folder / captions_name
         subtitle = captions_path if original.get("captions") and captions_path.is_file() else None
-        logo = Path(job["logo"]) if job.get("logo") else None
+        if clean_settings:
+            # Rebuild from the saved ORIGINAL source to avoid stacking old
+            # software-generated captions and logos on top of a new export.
+            subtitle = None
+            logo = brand_path(clean_settings["brand_id"])
+        else:
+            logo = Path(job["logo"]) if job.get("logo") else None
         if logo is not None and not logo.is_file():
             raise RuntimeError("The original selected logo is no longer available")
         render_clip(source, temporary,
                     float(original["start"]), float(original["end"]), focus,
-                    subtitle, job.get("brand_name", ""), logo, has_audio,
-                    job.get("cover_old_brand", "none"))
+                    subtitle, "" if clean_settings else job.get("brand_name", ""), logo, has_audio,
+                    "none" if clean_settings else job.get("cover_old_brand", "none"),
+                    clean_settings["top"] if clean_settings else 0,
+                    clean_settings["bottom"] if clean_settings else 0)
         technical = inspect_export(temporary,
                                    float(original["end"]) - float(original["start"]),
                                    has_audio)
@@ -358,7 +366,14 @@ def _reframe_worker(job_id: str, source_filename: str, focus: str, output_name: 
                        if key not in ("file", "technical", "review")}
             variant.update({"file": output_name, "technical": technical,
                             "layout": focus, "source_clip": source_filename,
-                            "title": old_clip.get("title", "Highlight") + " · " + focus + " focus"})
+                            "title": old_clip.get("title", "Highlight") +
+                            (" · Bajo Mundo clean" if clean_settings else " · " + focus + " focus")})
+            if clean_settings:
+                variant.update({"captions": False, "clean_edit": True,
+                                "brand_id": clean_settings["brand_id"],
+                                "clean_top_pct": clean_settings["top"],
+                                "clean_bottom_pct": clean_settings["bottom"],
+                                "facebook_monetization_verified": False})
             if "review" not in latest or not latest["review"]:
                 latest["review"] = risk_review(
                     latest, latest["clips"], [], "", duration, has_audio)
@@ -369,10 +384,16 @@ def _reframe_worker(job_id: str, source_filename: str, focus: str, output_name: 
             report["clip"] = len(latest["clips"]) + 1
             report["status"] = "manual_review_required"
             report.setdefault("checks", []).append({
-                "level": "review", "title": "Check the new focus and embedded overlays",
-                "detail": "This crop changes the visible composition, not source rights. "
-                          "Watch the complete result for cut-off faces, existing captions "
-                          "and channel marks before publishing."
+                "level": "high" if clean_settings else "review",
+                "title": "Facebook originality and rights remain unverified" if clean_settings
+                         else "Check the new focus and embedded overlays",
+                "detail": ("Removing graphics, adding Bajo Mundo TV branding, and re-cropping "
+                           "does not grant rights or establish original Facebook monetizable content. "
+                           "Check rights to footage and music and add meaningful new creative content."
+                           if clean_settings else
+                           "This crop changes the visible composition, not source rights. "
+                           "Watch the complete result for cut-off faces, existing captions "
+                           "and channel marks before publishing.")
             })
             variant["review"] = report
             new_clips = latest["clips"] + [variant]
@@ -452,6 +473,77 @@ def reframe_saved_clip(
     EXECUTOR.submit(_reframe_worker, job_id, clip_file, focus, candidate)
     return {"status": "queued", "file": candidate,
             "detail": "A new focused copy is being rendered; original clip is unchanged."}
+
+
+@app.post("/api/jobs/{job_id}/clean", status_code=202)
+def clean_saved_clip(
+    job_id: str,
+    clip_file: str = Form(...),
+    focus: str = Form("fill"),
+    clean_top: int = Form(0),
+    clean_bottom: int = Form(0),
+    brand_id: str = Form("bajo-mundo"),
+    rights_confirmed: bool = Form(False),
+    x_access_key: str | None = Header(default=None),
+):
+    """Create a separate, clean branded edit from a saved original.
+
+    Removes our generated overlay and crops top/bottom *pixels* when selected.
+    Embedded marks inside the kept scene are not reconstructed or erased.
+    Nothing is automatically posted or marked monetization-eligible.
+    """
+    protect(x_access_key)
+    if not rights_confirmed:
+        raise HTTPException(400, "Confirm your right to edit the source video and music.")
+    if focus not in ("fill", "left", "right"):
+        raise HTTPException(400, "Choose a supported framing.")
+    if not (0 <= clean_top <= 35 and 0 <= clean_bottom <= 35 and
+            clean_top + clean_bottom <= 50):
+        raise HTTPException(400, "Select up to 35% from either edge and 50% total.")
+    if not re.fullmatch(r"clip_[0-9]{2}(?:(?:_focus_(?:left|right|fill)|_clean)_[0-9]{2})?\.mp4",
+                        clip_file):
+        raise HTTPException(400, "Choose a saved clip.")
+    try:
+        selected_logo = brand_path(brand_id)
+        if not selected_logo:
+            raise ValueError("Choose a real channel logo")
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(400, "Selected channel logo is not available.") from exc
+    with LOCK:
+        job = read_job(job_id)
+        if job.get("status") != "completed":
+            raise HTTPException(409, "This project has not completed.")
+        selected = next((c for c in job.get("clips", []) if c.get("file") == clip_file), None)
+        if selected is None:
+            raise HTTPException(404, "The selected clip was not found.")
+        source_clip = selected.get("source_clip") or clip_file
+        if not re.fullmatch(r"clip_[0-9]{2}\.mp4", source_clip):
+            raise HTTPException(400, "Saved original clip is unavailable.")
+        if not any(c.get("file") == source_clip for c in job.get("clips", [])):
+            raise HTTPException(404, "Original clip metadata is unavailable.")
+        if not Path(job.get("source", "")).is_file():
+            raise HTTPException(409, "Original video unavailable. Re-upload it to clean.")
+        if job.get("reframe", {}).get("status") in ("queued", "rendering"):
+            raise HTTPException(409, "Wait for the current edit to finish.")
+        if len(job.get("clips", [])) >= 20:
+            raise HTTPException(409, "The project already has 20 saved versions.")
+        version = 1
+        while True:
+            candidate = f"{source_clip[:-4]}_clean_{version:02}.mp4"
+            if not (job_dir(job_id) / "outputs" / candidate).exists():
+                break
+            version += 1
+            if version > 99:
+                raise HTTPException(409, "Too many clean edits of this clip.")
+        update_job(job_id, reframe={
+            "status": "queued", "file": candidate, "focus": focus,
+            "source_clip": source_clip, "clean": True
+        })
+    EXECUTOR.submit(_reframe_worker, job_id, source_clip, focus, candidate,
+                    {"brand_id": brand_id, "top": clean_top, "bottom": clean_bottom})
+    return {"status": "queued", "file": candidate,
+            "detail": "Creating a new clean channel-branded copy. Originals remain unchanged.",
+            "monetization_verified": False}
 
 
 @app.get("/api/jobs/{job_id}/files/{filename}")
