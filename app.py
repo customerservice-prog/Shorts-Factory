@@ -153,7 +153,9 @@ def process_brand_only(job_id: str):
         technical = brand_full_video(
             job["source"], target, job["logo"],
             position=job["logo_position"],
-            crop_top=job["crop_top"], crop_bottom=job["crop_bottom"]
+            crop_top=job["crop_top"], crop_bottom=job["crop_bottom"],
+            logo_size=job.get("logo_size", 30),
+            logo_opacity=job.get("logo_opacity", 100)
         )
         update_job(job_id, progress=93, note="Verifying full video duration and audio...")
         clip = {
@@ -184,8 +186,11 @@ def process_brand_only(job_id: str):
 @app.post("/api/brand-only", status_code=202)
 async def submit_brand_only(
     video: UploadFile = File(...),
-    brand_id: str = Form("bajo-mundo"),
+    brand_id: str = Form("bajo-mundo-studio"),
     logo_position: str = Form("top_right"),
+    logo_size: int = Form(30),
+    logo_opacity: int = Form(100),
+    logo_already_embedded: bool = Form(False),
     crop_top: int = Form(0),
     crop_bottom: int = Form(0),
     rights: str = Form("unknown"),
@@ -199,6 +204,8 @@ async def submit_brand_only(
         raise HTTPException(400, "Acknowledge that branding does not grant monetization or reposting rights.")
     if logo_position not in POSITIONS:
         raise HTTPException(400, "Choose a valid logo position.")
+    if not (15 <= logo_size <= 40 and 60 <= logo_opacity <= 100):
+        raise HTTPException(400, "Watermark size or opacity is outside safe limits.")
     if not (0 <= crop_top <= 25 and 0 <= crop_bottom <= 25 and
             crop_top + crop_bottom <= 40):
         raise HTTPException(400, "Edge crop limit is 25% per side or 40% combined.")
@@ -227,8 +234,9 @@ async def submit_brand_only(
         needed_space = max(180 * 1024 * 1024, source.stat().st_size * 2)
         if shutil.disk_usage(BASE).free < needed_space:
             raise HTTPException(507, "Not enough server space to safely render this video. Archive previous exports first.")
-        logo_snapshot = folder / "brand.png"
-        shutil.copyfile(logo_path, logo_snapshot)
+        logo_snapshot = folder / "brand.png" if not logo_already_embedded else None
+        if logo_snapshot:
+            shutil.copyfile(logo_path, logo_snapshot)
         now = int(time.time())
         channel = next((x["name"] for x in list_brands() if x["id"] == brand_id),
                        "Selected channel")
@@ -242,8 +250,10 @@ async def submit_brand_only(
             "originality": originality, "target_platform": "facebook_reels",
             "rights_evidence": "", "brand_id": brand_id, "channel_name": channel,
             "logo_position": logo_position,
+            "logo_size": logo_size, "logo_opacity": logo_opacity,
+            "logo_already_embedded": logo_already_embedded,
             "crop_top": crop_top, "crop_bottom": crop_bottom,
-            "source": str(source), "logo": str(logo_snapshot),
+            "source": str(source), "logo": str(logo_snapshot) if logo_snapshot else None,
             "review": None, "clips": [], "warnings": [],
             "zip_file": None, "transcript": ""
         }
@@ -273,7 +283,7 @@ def config():
 @app.get("/api/brands")
 def get_brands(x_access_key: str | None = Header(default=None)):
     protect(x_access_key)
-    return {"brands": list_brands(), "default": "bajo-mundo"}
+    return {"brands": list_brands(), "default": "bajo-mundo-studio"}
 
 
 @app.get("/api/brands/{brand_id}/logo")
@@ -361,7 +371,7 @@ async def create_job(
     layout: str = Form(default="fill"),
     captions: str = Form(default="pop"),
     brand_name: str = Form(default=""),
-    brand_id: str = Form(default="bajo-mundo"),
+    brand_id: str = Form(default="bajo-mundo-studio"),
     cover_old_brand: str = Form(default="none"),
     rights: str = Form(default="unknown"),
     audio_rights: str = Form(default="unknown"),
