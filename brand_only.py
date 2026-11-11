@@ -29,16 +29,21 @@ def probe_media(path):
 
 
 def brand_full_video(source, destination, logo, *, position="top_right",
-                     crop_top=0, crop_bottom=0):
+                     crop_top=0, crop_bottom=0, logo_size=30, logo_opacity=100):
     """Preserve the source's complete timeline, audio and native frame geometry.
 
     Optional edge crops remove portions of the picture, not the duration.
     No Whisper, scoring, content sampling, automatic watermark recognition,
     platform eligibility decisions or downloads from third-party services.
     """
-    source, destination, logo = Path(source), Path(destination), Path(logo)
-    if not source.is_file() or not logo.is_file():
+    source, destination = Path(source), Path(destination)
+    logo = Path(logo) if logo is not None else None
+    if not source.is_file() or (logo is not None and not logo.is_file()):
         raise ValueError("Source video or selected channel logo is unavailable")
+    if type(logo_size) is not int or not 15 <= logo_size <= 40:
+        raise ValueError("Choose a logo size from 15% to 40%")
+    if type(logo_opacity) is not int or not 60 <= logo_opacity <= 100:
+        raise ValueError("Choose watermark opacity from 60% to 100%")
     if position not in POSITIONS:
         raise ValueError("Unsupported channel logo placement")
     if (not all(type(v) is int and 0 <= v <= 25 for v in (crop_top, crop_bottom))
@@ -50,8 +55,8 @@ def brand_full_video(source, destination, logo, *, position="top_right",
     if before["width"] < 96 or before["height"] < 96:
         raise ValueError("Source video dimensions are too small")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    logo_width = max(58, min(360, int(before["width"] * 0.22)))
-    margin = max(9, int(before["width"] * 0.026))
+    logo_width = max(58, min(360, int(before["width"] * logo_size / 100)))
+    margin = max(12, int(before["width"] * 0.035))
     x = str(margin) if position.endswith("left") else f"W-w-{margin}"
     y = str(margin) if position.startswith("top") else f"H-h-{margin}"
     crop_filter = ""
@@ -59,16 +64,22 @@ def brand_full_video(source, destination, logo, *, position="top_right",
         # Crop after decoding; keep the video and audio timelines untouched.
         crop_filter = (f"crop=iw:trunc(ih*{(100-crop_top-crop_bottom)/200:.6f})*2:"
                        f"0:trunc(ih*{crop_top/200:.6f})*2,")
-    vf = (
-        f"[0:v]{crop_filter}scale=trunc(iw/2)*2:trunc(ih/2)*2,"
-        "setsar=1[base];"
-        f"[1:v]format=rgba,scale={logo_width}:-2:flags=lanczos[brand];"
-        f"[base][brand]overlay={x}:{y}:eof_action=repeat:format=auto,"
-        "format=yuv420p[outv]"
-    )
+    vf = (f"[0:v]{crop_filter}scale=trunc(iw/2)*2:trunc(ih/2)*2,"
+          "setsar=1[base]")
+    if logo is not None:
+        vf += (f";[1:v]format=rgba,scale={logo_width}:-2:flags=lanczos,"
+               f"colorchannelmixer=aa={logo_opacity/100:.2f}[brand];"
+               f"[base][brand]overlay={x}:{y}:eof_action=repeat:format=auto,"
+               "format=yuv420p[outv]")
+    else:
+        vf += ";[base]format=yuv420p[outv]"
     command = [
         "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
-        "-i", str(source), "-i", str(logo),
+        "-i", str(source),
+    ]
+    if logo is not None:
+        command += ["-i", str(logo)]
+    command += [
         "-filter_complex", vf, "-map", "[outv]", "-map", "0:a:0?",
         "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1",
         "-c:v", "libx264", "-preset", os.getenv("BRAND_FFMPEG_PRESET", "veryfast"),
@@ -93,6 +104,8 @@ def brand_full_video(source, destination, logo, *, position="top_right",
             "original_duration": round(before["duration"], 3),
             "original_width": before["width"], "original_height": before["height"],
             "full_length": True, "captions_added": False,
+            "logo_added": logo is not None, "logo_size": logo_size if logo else 0,
+            "logo_opacity": logo_opacity if logo else 0,
             "size_bytes": destination.stat().st_size
         }
     except Exception:
