@@ -7,7 +7,7 @@
   <title>Shorts Factory — AI Clip Studio</title>
   <meta name="description" content="Turn long videos into captioned, branded, vertical Shorts with a private editing studio.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=12">
+  <link rel="stylesheet" href="/style.css?v=13">
 </head>
 <body>
   <div class="app-shell">
@@ -93,6 +93,15 @@
               <div class="stage-meta">
                 <div><div class="stage-meta-kicker">NOW PREVIEWING <span id="stagePosition">01 / 05</span></div><h3 id="stageClipTitle">Choose a clip to preview</h3><p id="stageClipDetails">Review the clip before sharing.</p></div>
                 <div class="stage-meta-actions"><button type="button" class="subtle-btn" id="stageCopy">⧉ Copy caption</button><button type="button" class="subtle-btn" id="stageCoverDownload">↓ Save cover JPG</button><button type="button" class="primary-small-btn" id="stageDownload">↓ Download MP4</button></div>
+              </div>
+              <div class="saved-smart-clean" id="savedSmartClean">
+                <div>
+                  <strong>Fix old branding in this saved video</strong>
+                  <p>Reprocess the saved original with a Bajo Mundo TV logo and automatic old-text scan. Static logos, reaction windows and heavy graphics can still require manual work.</p>
+                </div>
+                <label><input type="checkbox" id="savedCleanPermission"> I have permission to edit and rebrand this footage.</label>
+                <button type="button" id="savedCleanBtn">✦ Scan &amp; create new clean copy</button>
+                <p id="savedCleanState" role="status">Your original export will remain unchanged.</p>
               </div>
               <div class="reframe-tool" id="reframeTool" aria-label="Fix clip framing">
                 <div class="reframe-heading">
@@ -184,15 +193,20 @@
                   <button type="button" id="cleanupPlay">▶ Play / Pause</button>
                   <input id="cleanupSeek" type="range" min="0" max="100" step="0.1" value="0" aria-label="Scrub video to inspect overlays">
                 </div>
+                <label class="cleanup-auto">
+                  <input type="checkbox" id="autoCleanup" checked>
+                  <span><strong>Smart cleanup on every video</strong>
+                  <small>Automatically scan and repair confidently detected text areas during export. Other possible logos or face-cams are flagged for review, not blindly erased.</small></span>
+                </label>
                 <div class="cleanup-commands">
-                  <button type="button" id="cleanupSuggest" disabled>✦ Find likely text overlays</button>
+                  <button type="button" id="cleanupSuggest" disabled>✦ Preview detected overlays</button>
                   <button type="button" id="cleanupApplySuggestions" class="hidden">Apply suggestions</button>
                   <button type="button" id="cleanupClear">Clear all boxes</button>
                 </div>
-                <p id="cleanupInfo" role="status">Select videos above, then drag rectangles over any old text or logo you want cleaned. The first selected video is your preview.</p>
+                <p id="cleanupInfo" role="status">Select a video. Smart cleanup runs automatically on authorized exports, while you can also preview suggestions and draw your own removal boxes.</p>
                 <label class="cleanup-authorized"><input type="checkbox" id="cleanupAuthorized">
                   I own or have permission to modify the old graphics and attribution.</label>
-                <p class="cleanup-limit">The editor reconstructs marked areas using nearby pixels. Results can smear moving details, so review the entire video before publishing. Suggested areas are never applied without your review. Batch masks use the same positions in each video.</p>
+                <p class="cleanup-limit">Smart cleanup estimates missing pixels and may blur complex footage. Text suggestions can be automatically applied only after permission is confirmed; uncertain graphic areas remain review-only. Every full-length export requires visual review before publishing. Batch manual boxes use the same positions in each video.</p>
               </section>
               <div class="brand-show-style">
                 <strong>Show-style video presentation</strong>
@@ -325,6 +339,6 @@
   </div>
   <div class="modal-backdrop hidden" id="authModal"><form class="auth-modal" id="authForm"><div class="auth-icon">▶</div><h2>Welcome to your studio</h2><p>Enter the private password configured for your Shorts Factory server.</p><label for="accessPassword">Access password</label><input type="password" id="accessPassword" autocomplete="current-password" placeholder="Your studio password" required><button type="submit" class="generate-button">Unlock studio <span>↗</span></button><span class="auth-error" id="authError"></span></form></div>
   <div class="toast hidden" id="toast" role="status"></div>
-  <script src="/app.js?v=12" defer></script>
+  <script src="/app.js?v=13" defer></script>
 </body>
 </html>
