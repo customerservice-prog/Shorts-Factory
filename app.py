@@ -584,7 +584,13 @@ def get_output(job_id: str, filename: str, x_access_key: str | None = Header(def
     file_path = job_dir(job_id) / "outputs" / filename
     if not file_path.is_file():
         raise HTTPException(404, "File not found")
-    return FileResponse(file_path, filename=filename, media_type="application/zip" if filename.endswith(".zip") else "video/mp4")
+    download_name = filename
+    if job.get("mode") == "brand_only" and filename == "clip_01.mp4":
+        base_name = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(job.get("filename", "video")).stem)
+        channel_name = re.sub(r"[^A-Za-z0-9_-]+", "_", job.get("channel_name", "Bajo_Mundo_TV"))
+        download_name = (base_name[:85].strip("_") or "video") + "_" + (channel_name[:35].strip("_") or "Branded") + ".mp4"
+    return FileResponse(file_path, filename=download_name,
+                        media_type="application/zip" if filename.endswith(".zip") else "video/mp4")
 
 
 @app.get("/api/jobs/{job_id}/thumbnails/{clip_filename}")
