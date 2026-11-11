@@ -168,10 +168,9 @@ def process_brand_only(job_id: str):
         review = risk_review(job, [clip], [], "", before["duration"], before["has_audio"])
         clip["review"] = review["clip_reviews"][0]
         review["source_findings"].append({
-            "level": "high", "title": "Branding is not monetization clearance",
+            "level": "review", "title": "Branding is not monetization clearance",
             "detail": "The full video was branded, not newly created. Confirm visual and audio rights, original contribution and Facebook account eligibility before posting."
         })
-        review["status"] = "high_risk" if job.get("rights") != "owned" or job.get("originality") != "original" else "manual_review_required"
         update_job(job_id, status="completed", progress=100,
                    note="Full-length branded video ready. Originals preserved.",
                    clips=[clip], review=review, zip_file=None, transcript="",
@@ -225,6 +224,9 @@ async def submit_brand_only(
     try:
         source = folder / ("source" + suffix)
         await save_upload(video, source, MAX_UPLOAD)
+        needed_space = max(180 * 1024 * 1024, source.stat().st_size * 2)
+        if shutil.disk_usage(BASE).free < needed_space:
+            raise HTTPException(507, "Not enough server space to safely render this video. Archive previous exports first.")
         logo_snapshot = folder / "brand.png"
         shutil.copyfile(logo_path, logo_snapshot)
         now = int(time.time())
