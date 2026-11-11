@@ -22,6 +22,8 @@
   let pendingCompletionId = null;
   let lastDisplayedClipFile = null;
   let lastReframeSeen = null;
+  // New uploads are the default workspace; saved exports open only on request.
+  let showingNewProject = true;
   const thumbs = new Map();
   const pendingThumbs = new Map();
   const pad = (number) => String(number).padStart(2, "0");
@@ -486,6 +488,7 @@
       activeJobId = job.id;
       selectedJobId = job.id;
       pendingCompletionId = job.id;
+      showingNewProject = false;
       renderedResultsKey = "";
       toast("Video uploaded. Your processing job has started.");
       await refreshJobs();
@@ -591,6 +594,7 @@
       $("results").classList.add("hidden");
       return;
     }
+    showingNewProject = false;
     const fingerprint = job.id + "/" + (job.clips || []).map(c => c.file).join("|");
     const previousFile = selectedJobId === job.id ? lastDisplayedClipFile : null;
     selectedJobId = job.id;
@@ -698,20 +702,22 @@
       renderHistory();
       const working = jobs.find(j => ["queued", "analyzing", "rendering"].includes(j.status));
       if (working) activeJobId = working.id;
-      if (activeJobId) renderProgress(jobs.find(j => j.id === activeJobId));
-      const selected = jobs.find(j => j.id === selectedJobId);
-      if (selected?.status === "completed") {
-        renderResults(selected);
-        updateReframeStatus(selected);
-      }
-      else if (!selectedJobId || !selected) {
-        const latest = jobs.find(j => j.status === "completed");
-        if (latest) renderResults(latest);
-      }
-      if (pendingCompletionId && jobs.some(j => j.id === pendingCompletionId && j.status === "completed")) {
-        pendingCompletionId = null;
-        toast("Your shorts are ready! Pick a thumbnail to review.");
-        setTimeout(() => $("results").scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+      if (!showingNewProject) {
+        if (activeJobId) renderProgress(jobs.find(j => j.id === activeJobId));
+        const selected = jobs.find(j => j.id === selectedJobId);
+        if (selected?.status === "completed") {
+          renderResults(selected);
+          updateReframeStatus(selected);
+        }
+        else if (!selectedJobId || !selected) {
+          const latest = jobs.find(j => j.status === "completed");
+          if (latest) renderResults(latest);
+        }
+        if (pendingCompletionId && jobs.some(j => j.id === pendingCompletionId && j.status === "completed")) {
+          pendingCompletionId = null;
+          toast("Your video is ready! Open My exports to review.");
+          setTimeout(() => $("results").scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+        }
       }
     } catch (error) {
       $("systemState").textContent = "Connection issue";
@@ -752,6 +758,7 @@
     const index = (job.clips || []).findIndex(c => c.file === file);
     if (index < 0) return;
     if (selectedJobId !== jobId) renderResults(job);
+    showingNewProject = false;
     selectClip(index, true);
     showPage("create", false);
     $("results").scrollIntoView({ behavior: "smooth", block: "start" });
@@ -996,17 +1003,22 @@
       }
     });
     const openEditor = () => {
-      showPage("create", false);
+      // Explicitly enter NEW PROJECT instead of leaving the last exported video
+      // in front of the form. The 3.5-second poll must not reopen it.
+      showingNewProject = true;
+      selectedJobId = null;
+      renderedResultsKey = "";
+      $("results").classList.add("hidden");
+      $("activePanel").classList.add("hidden");
+      document.body.classList.remove("has-results");
       document.body.classList.add("show-editor");
       resetSource();
+      showPage("create", false);
       $("brandQuick").scrollIntoView({behavior:"smooth",block:"start"});
     };
     $("newProjectBtn").addEventListener("click", openEditor);
     $("refreshBtn").addEventListener("click", () => refreshJobs().catch((e) => toast(e.message)));
-    $("navCreate").addEventListener("click", () => {
-      if (document.body.classList.contains("has-results")) openEditor();
-      else showPage("create");
-    });
+    $("navCreate").addEventListener("click", openEditor);
     $("navLibrary").addEventListener("click", () => showPage("library"));
     $("authForm").addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -1029,7 +1041,8 @@
     $("pageLibrary").classList.toggle("hidden", createPage);
     $("navCreate").classList.toggle("active", createPage);
     $("navLibrary").classList.toggle("active", !createPage);
-    $("pageCrumb").textContent = createPage ? "NEW PROJECT" : "MY EXPORTS";
+    $("pageCrumb").textContent = createPage ?
+      (showingNewProject ? "NEW PROJECT" : "PROJECT RESULTS") : "MY EXPORTS";
     if (shouldScroll) window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
