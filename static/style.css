@@ -461,3 +461,34 @@ body.has-results:not(.show-editor) .brand-quick{display:none}
  padding:6px 4px;border-radius:5px;background:#0b0d12bf}
 .show-caption-demo.clean{color:#fff}
 .show-banner-demo[hidden],.show-caption-demo[hidden]{display:none}
+
+
+/* V12: visual overlay cleanup / before new Bajo Mundo branding. */
+.cleanup-graphics{padding:15px;background:#0f1b23;border:1px solid #567078;
+ border-radius:13px;margin:12px 0;display:grid;gap:11px}
+.cleanup-head{display:grid;gap:5px}
+.cleanup-head strong{font-size:14px;color:#eef7f6}
+.cleanup-head small,.cleanup-limit,.cleanup-graphics>p{font-size:11px;color:#b4c6cd;line-height:1.6;margin:0}
+.cleanup-video-shell{position:relative;width:100%;max-height:520px;min-height:120px;overflow:hidden;
+ background:#050708;border:1px solid #5a6e78;border-radius:12px;touch-action:none;margin:0 auto}
+.cleanup-video-shell video{display:block;width:100%;height:100%;position:absolute;inset:0;object-fit:fill}
+.cleanup-draw-layer{position:absolute;inset:0;cursor:crosshair;touch-action:none;user-select:none}
+.cleanup-box{position:absolute;border:2px solid #ffcc65;background:#ed913e30;box-shadow:0 0 0 1px #211610a8 inset;
+ pointer-events:none;border-radius:3px;display:flex;justify-content:space-between;align-items:flex-start}
+.cleanup-box>span{background:#1b1e24ed;color:#ffeac6;font-size:9px;line-height:1.3;font-weight:800;padding:3px 5px}
+.cleanup-box .cleanup-delete{pointer-events:auto;border:0;background:#b93f36;color:white;font-size:14px;
+ width:22px;height:22px;cursor:pointer}
+.cleanup-box.draft{border-style:dashed;border-color:#bdf877;background:#bdf87722}
+.cleanup-box.suggested{border-style:dashed;border-color:#71d5fa;background:#70d3f32b}
+.cleanup-box.suggested>span{color:#d4fbff}
+.cleanup-seek{display:flex;gap:9px;align-items:center}
+.cleanup-seek button,.cleanup-commands button{background:#1b2b35;color:#eff7f2;
+ border:1px solid #537078;border-radius:8px;font-size:11px;font-weight:800;padding:10px 11px;cursor:pointer}
+.cleanup-commands{display:flex;gap:8px;flex-wrap:wrap}
+.cleanup-commands button:first-child{color:#c9f6bb}
+.cleanup-commands button:disabled{opacity:.5;cursor:not-allowed}
+.cleanup-seek input{width:100%;accent-color:#c6fa63}
+.cleanup-authorized{display:flex;gap:10px;color:#d4e1d8;font-size:11px;line-height:1.6}
+.cleanup-authorized input{accent-color:#ceff6d;align-self:flex-start;margin-top:3px}
+.cleanup-graphics .hidden{display:none!important}
+@media(max-width:600px){.cleanup-graphics{padding:12px}.cleanup-commands button{flex:1 1 43%}.cleanup-video-shell{max-height:460px}}
