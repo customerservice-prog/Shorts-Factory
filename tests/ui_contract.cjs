@@ -58,6 +58,15 @@ assert.ok(script.includes('document.body.classList.remove("has-results")'), "New
 assert.ok(script.includes('if (!showingNewProject) {'), "Polling must not replace the new uploader with an old export");
 assert.ok(html.includes('Brand full videos. Automatically.'), "Batch branding section must be visible in new-project flow");
 
+assert.ok(html.includes('id="brandCustomLogoBtn"') && html.includes('id="brandCustomLogoFile"') &&
+  html.includes('id="brandCustomLogoStatus"'), "Full-video brand uploader must be visible");
+assert.ok(script.includes('async function uploadFullVideoLogo(file)'), "Custom logo upload handler missing");
+assert.ok(script.includes('form.append("logo", file, file.name)'), "Uploaded logo must reach brand API");
+assert.ok(script.includes('await api("/api/brands"'), "Logo image must be saved as reusable brand");
+assert.ok(script.includes('$("brandOnlyProfile").value = saved.id'), "New image must be selected for full-video exports");
+assert.ok(script.includes('$("brandLogoAlreadyEmbedded").checked = false'), "New logo should not be silently skipped");
+assert.ok(backend.includes('@app.post("/api/brands"'), "Authenticated persistent-logo endpoint missing");
+
 assert.ok(script.includes("updateFullVideoPreview"), "Watermark preview not wired");
 assert.ok(script.includes('form.append("logo_size"'), "Size control not passed to backend");
 assert.ok(script.includes('form.append("logo_opacity"'), "Opacity control not passed to backend");
