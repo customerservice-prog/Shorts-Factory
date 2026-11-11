@@ -843,6 +843,9 @@
     const alpha = Number($("brandLogoOpacity").value);
     $("brandLogoSizeValue").textContent = percent + "%";
     $("brandLogoOpacityValue").textContent = alpha + "%";
+    $("showBannerDemo").hidden = !$("brandFollowBanner").checked;
+    $("showCaptionDemo").hidden = $("brandSubtitleMode").value === "none";
+    $("showCaptionDemo").classList.toggle("clean", $("brandSubtitleStyle").value === "clean");
     $("watermarkPreviewMessage").textContent = skipped ?
       "No extra watermark will be burned in. Your existing on-video logo stays." :
       "New exports will display " + (profile?.name || "your logo") +
@@ -891,7 +894,7 @@
         (count > 3 ? " · and " + (count - 3) + " more" : "") :
       "One video or a whole batch · MP4, MOV, MKV, WEBM, M4V";
     $("brandBatchStatus").textContent = count ?
-      "Ready to brand, full-length. No cuts or automatic captions." :
+      "Ready for full-length video. Selected speech subtitles may take longer and need proofreading." :
       "Choose valid video files under the per-video size limit.";
     if (all.length > count) toast((all.length-count) + " unsupported or oversized file(s) skipped.");
     updateBrandBatchButton();
@@ -921,6 +924,11 @@
         form.append("logo_size", $("brandLogoSize").value);
         form.append("logo_opacity", $("brandLogoOpacity").value);
         form.append("logo_already_embedded", $("brandLogoAlreadyEmbedded").checked ? "true" : "false");
+        form.append("subtitle_mode", $("brandSubtitleMode").value);
+        form.append("subtitle_style", $("brandSubtitleStyle").value);
+        form.append("follow_banner", $("brandFollowBanner").checked ? "true" : "false");
+        form.append("performance_permission", $("brandPerformancePermission").value);
+        form.append("release_reference", $("brandReleaseReference").value);
         form.append("crop_top", String(top));
         form.append("crop_bottom", String(bottom));
         form.append("rights", $("brandOnlyRights").value);
@@ -951,7 +959,8 @@
   function setupBrandOnly() {
     $("brandOnlyProfile").addEventListener("change", () => updateFullVideoPreview(true));
     for (const id of ["brandOnlyPosition", "brandLogoSize", "brandLogoOpacity",
-                      "brandLogoAlreadyEmbedded"]) {
+                      "brandLogoAlreadyEmbedded", "brandSubtitleMode",
+                      "brandSubtitleStyle", "brandFollowBanner"]) {
       $(id).addEventListener("input", () => updateFullVideoPreview(false));
       $(id).addEventListener("change", () => updateFullVideoPreview(false));
     }
