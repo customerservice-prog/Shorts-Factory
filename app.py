@@ -218,7 +218,7 @@ def process_brand_only(job_id: str):
             "level": "review", "title": "Own-camera footage is not automatically music-cleared",
             "detail": "Even when you filmed it, the performer, songwriters, publishers or labels may control music and performance rights. Written permission and platform review may still be required."
         })
-        if job.get("performance_permission", "unknown") != "written":
+        if job.get("performance_permission", "unknown") == "unknown":
             review["status"] = "high_risk"
             review["source_findings"].append({
                 "level": "high", "title": "Artist/performance release not confirmed",
