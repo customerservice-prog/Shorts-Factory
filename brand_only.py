@@ -55,7 +55,7 @@ def brand_full_video(source, destination, logo, *, position="top_right",
     if before["width"] < 96 or before["height"] < 96:
         raise ValueError("Source video dimensions are too small")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    logo_width = max(58, min(360, int(before["width"] * logo_size / 100)))
+    logo_width = max(58, min(1200, int(before["width"] * logo_size / 100)))
     margin = max(12, int(before["width"] * 0.035))
     x = str(margin) if position.endswith("left") else f"W-w-{margin}"
     y = str(margin) if position.startswith("top") else f"H-h-{margin}"
