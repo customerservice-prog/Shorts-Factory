@@ -186,7 +186,7 @@ def process_brand_only(job_id: str):
 @app.post("/api/brand-only", status_code=202)
 async def submit_brand_only(
     video: UploadFile = File(...),
-    brand_id: str = Form("bajo-mundo-studio"),
+    brand_id: str = Form("bajo-mundo"),
     logo_position: str = Form("top_right"),
     logo_size: int = Form(30),
     logo_opacity: int = Form(100),
@@ -283,7 +283,7 @@ def config():
 @app.get("/api/brands")
 def get_brands(x_access_key: str | None = Header(default=None)):
     protect(x_access_key)
-    return {"brands": list_brands(), "default": "bajo-mundo-studio"}
+    return {"brands": list_brands(), "default": "bajo-mundo"}
 
 
 @app.get("/api/brands/{brand_id}/logo")
@@ -371,7 +371,7 @@ async def create_job(
     layout: str = Form(default="fill"),
     captions: str = Form(default="pop"),
     brand_name: str = Form(default=""),
-    brand_id: str = Form(default="bajo-mundo-studio"),
+    brand_id: str = Form(default="bajo-mundo"),
     cover_old_brand: str = Form(default="none"),
     rights: str = Form(default="unknown"),
     audio_rights: str = Form(default="unknown"),

@@ -117,12 +117,12 @@
   };
 
 
-  async function loadBrands(selectedId = "bajo-mundo-studio") {
+  async function loadBrands(selectedId = "bajo-mundo") {
     const response = await api("/api/brands");
     const data = await response.json();
     channelProfiles = data.brands || [];
     const select = $("brandProfile");
-    const safe = channelProfiles.some(p => p.id === selectedId) ? selectedId : "bajo-mundo-studio";
+    const safe = channelProfiles.some(p => p.id === selectedId) ? selectedId : "bajo-mundo";
     select.replaceChildren();
     for (const brand of channelProfiles) {
       const option = document.createElement("option");
@@ -140,7 +140,7 @@
       batch.appendChild(option);
     }
     batch.value = channelProfiles.some(p => p.id === old && p.logo_url) ? old :
-      (channelProfiles.some(p => p.id === safe && p.logo_url) ? safe : "bajo-mundo-studio");
+      (channelProfiles.some(p => p.id === safe && p.logo_url) ? safe : "bajo-mundo");
     await updateBrandPreview();
     await updateFullVideoPreview(true);
   }
