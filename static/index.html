@@ -7,7 +7,7 @@
   <title>Shorts Factory — AI Clip Studio</title>
   <meta name="description" content="Turn long videos into captioned, branded, vertical Shorts with a private editing studio.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=7">
+  <link rel="stylesheet" href="/style.css?v=8">
 </head>
 <body>
   <div class="app-shell">
@@ -67,7 +67,7 @@
           <div class="results-heading">
             <div>
               <div class="eyebrow"><span class="ready-dot"></span> YOUR EDITING STUDIO · EXPORTS READY</div>
-              <h2>Meet your new shorts <span class="results-count" id="resultsCount">5 clips</span></h2>
+              <h2><span id="resultsTitle">Meet your new shorts</span> <span class="results-count" id="resultsCount">5 clips</span></h2>
               <p>See the actual video frames, review each edit, and download only what you like.</p>
             </div>
             <div class="result-actions">
@@ -94,7 +94,7 @@
                 <div><div class="stage-meta-kicker">NOW PREVIEWING <span id="stagePosition">01 / 05</span></div><h3 id="stageClipTitle">Choose a clip to preview</h3><p id="stageClipDetails">Review the clip before sharing.</p></div>
                 <div class="stage-meta-actions"><button type="button" class="subtle-btn" id="stageCopy">⧉ Copy caption</button><button type="button" class="subtle-btn" id="stageCoverDownload">↓ Save cover JPG</button><button type="button" class="primary-small-btn" id="stageDownload">↓ Download MP4</button></div>
               </div>
-              <div class="reframe-tool" aria-label="Fix clip framing">
+              <div class="reframe-tool" id="reframeTool" aria-label="Fix clip framing">
                 <div class="reframe-heading">
                   <div><strong>Fix the split-screen look</strong><small>Create a fresh crop from the saved original. Your existing export stays unchanged.</small></div>
                   <span>RE-EDIT</span>
@@ -118,7 +118,7 @@
               <div class="stage-side-footer"><span>✧</span> Each thumbnail is a real frame from its exported video, not a placeholder.</div>
             </aside>
           </div>
-          <div class="gallery-heading"><div><h3>All clips</h3><p>Choose a thumbnail to watch the actual edit.</p></div><span class="gallery-hint">9:16 · FULL HD</span></div>
+          <div class="gallery-heading"><div><h3 id="galleryTitle">All clips</h3><p>Choose a thumbnail to watch the actual edit.</p></div><span class="gallery-hint">9:16 · FULL HD</span></div>
           <div class="clips-grid" id="clipsGrid"></div>
           <details id="reviewPanel" class="publishing-review" aria-label="Publishing rights and quality review">
             <summary class="review-title">
@@ -134,7 +134,46 @@
           </details>
         </section>
 
-        <div class="editor-heading"><div><span class="eyebrow">CREATE MORE CONTENT</span><h2 id="editorHeadline">Create your first batch</h2></div><span>Upload → customize → generate</span></div>
+        <section class="brand-quick" id="brandQuick" aria-label="Batch brand entire videos">
+          <div class="brand-quick-head">
+            <span class="eyebrow"><span class="ready-dot"></span> FAST MODE · NO CUTTING</span>
+            <h2>Brand full videos. Automatically.</h2>
+            <p>Select one video or a batch of videos. Shorts Factory keeps every second and the original audio, adds your chosen channel logo, and saves each video separately. No Whisper transcription or highlight cuts.</p>
+          </div>
+          <div class="brand-quick-grid">
+            <div class="brand-file-drop" id="brandBatchDrop" role="button" tabindex="0" aria-label="Choose one or more entire videos">
+              <input id="brandBatchFiles" type="file" accept=".mp4,.mov,.webm,.mkv,.m4v,video/*" multiple hidden>
+              <div class="brand-drop-icon">▶</div>
+              <strong id="brandBatchFilesTitle">Choose videos to brand</strong>
+              <p id="brandBatchFilesDetail">One video or a whole batch · MP4, MOV, MKV, WEBM, M4V</p>
+              <button type="button" id="brandBatchBrowse" class="brand-quick-pick">＋ Select video files</button>
+            </div>
+            <div class="brand-quick-controls">
+              <label for="brandOnlyProfile">Apply this channel logo</label>
+              <select id="brandOnlyProfile"><option value="bajo-mundo">Bajo Mundo TV · default</option></select>
+              <label for="brandOnlyPosition">Logo placement</label>
+              <select id="brandOnlyPosition"><option value="top_right">Top right (recommended)</option><option value="top_left">Top left</option><option value="bottom_right">Bottom right</option><option value="bottom_left">Bottom left</option></select>
+              <details class="brand-optional">
+                <summary>Optional cleanup and Facebook review</summary>
+                <div class="brand-optional-grid">
+                  <label for="brandCropTop">Crop picture top (%) <input id="brandCropTop" type="number" min="0" max="25" value="0"></label>
+                  <label for="brandCropBottom">Crop picture bottom (%) <input id="brandCropBottom" type="number" min="0" max="25" value="0"></label>
+                  <label for="brandOnlyRights">Footage rights<select id="brandOnlyRights"><option value="unknown">Not verified</option><option value="owned">I created/own the footage</option><option value="licensed">Commercial use licensed</option><option value="commentary">Commentary/criticism · review needed</option></select></label>
+                  <label for="brandOnlyAudio">Music and audio rights<select id="brandOnlyAudio"><option value="unknown">Not verified</option><option value="owned">I own all audio</option><option value="licensed">Licensed for commercial use</option><option value="no_music">No third-party audio</option></select></label>
+                  <label for="brandOnlyOriginality">Original contribution<select id="brandOnlyOriginality"><option value="unknown">Not verified</option><option value="original">Original footage I created</option><option value="substantial_commentary">Substantial new analysis/storytelling</option><option value="minimal">Just branding/cropping</option></select></label>
+                </div>
+                <p>Top/bottom crops remove picture pixels, not video duration. They cannot reconstruct hidden footage or automatically remove embedded graphics.</p>
+              </details>
+            </div>
+          </div>
+          <label class="brand-rights-ack"><input id="brandRightsAcknowledged" type="checkbox"> I understand that changing branding does not grant copyright permission or Facebook monetization approval.</label>
+          <div class="brand-quick-footer">
+            <button id="brandBatchSubmit" type="button" disabled>Brand full videos <span>↗</span></button>
+            <div id="brandBatchStatus" role="status">Your original uploads are saved separately. Each output is a full-length MP4.</div>
+          </div>
+        </section>
+
+        <div class="editor-heading"><div><span class="eyebrow">OPTIONAL · HIGHLIGHT CUTS</span><h2 id="editorHeadline">Create highlight clips instead</h2></div><span>Upload → customize → generate</span></div>
         <form id="createForm" class="form-grid">
           <section class="panel upload-panel">
             <div class="section-top"><div><span class="section-number step-circle">1</span><div><h2>Add your video</h2><p class="section-description">Start with a file from your device</p></div></div><span class="soft-tag">SOURCE</span></div>
@@ -222,6 +261,6 @@
   </div>
   <div class="modal-backdrop hidden" id="authModal"><form class="auth-modal" id="authForm"><div class="auth-icon">▶</div><h2>Welcome to your studio</h2><p>Enter the private password configured for your Shorts Factory server.</p><label for="accessPassword">Access password</label><input type="password" id="accessPassword" autocomplete="current-password" placeholder="Your studio password" required><button type="submit" class="generate-button">Unlock studio <span>↗</span></button><span class="auth-error" id="authError"></span></form></div>
   <div class="toast hidden" id="toast" role="status"></div>
-  <script src="/app.js?v=7" defer></script>
+  <script src="/app.js?v=8" defer></script>
 </body>
 </html>

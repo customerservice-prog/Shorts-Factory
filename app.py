@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pipeline import make_shorts, generate_thumbnail, probe_video, render_clip
 from branding import BRAND_DIR, PROFILE_ID, brand_path, list_brands, save_brand
 from review import PLATFORMS, AUDIO_RIGHTS, ORIGINALITY, inspect_export, risk_review
+from brand_only import brand_full_video, POSITIONS, probe_media
 
 BASE = Path(os.getenv("DATA_DIR", "./data")).resolve()
 BASE.mkdir(parents=True, exist_ok=True)
@@ -136,6 +137,123 @@ def process(job_id: str):
                    zip_file=result["zip_file"], review=result["review"])
     except Exception as exc:
         update_job(job_id, status="failed", note=str(exc)[:500], progress=0)
+
+
+def process_brand_only(job_id: str):
+    """Video-only render: bypass transcription and highlight selection."""
+    try:
+        job = read_job(job_id)
+        update_job(job_id, status="rendering", progress=8,
+                   note="Branding full video; keeping all original seconds and audio...")
+        folder = job_dir(job_id)
+        outputs = folder / "outputs"
+        outputs.mkdir(exist_ok=True)
+        target = outputs / "clip_01.mp4"
+        before = probe_media(job["source"])
+        technical = brand_full_video(
+            job["source"], target, job["logo"],
+            position=job["logo_position"],
+            crop_top=job["crop_top"], crop_bottom=job["crop_bottom"]
+        )
+        update_job(job_id, progress=93, note="Verifying full video duration and audio...")
+        clip = {
+            "file": "clip_01.mp4",
+            "title": Path(job["filename"]).stem[:120],
+            "start": 0, "end": round(before["duration"], 3),
+            "length": round(before["duration"], 3),
+            "highlight_score": 0, "captions": False,
+            "layout": "original", "technical": technical,
+            "full_length": True, "brand_id": job["brand_id"]
+        }
+        review = risk_review(job, [clip], [], "", before["duration"], before["has_audio"])
+        clip["review"] = review["clip_reviews"][0]
+        review["source_findings"].append({
+            "level": "review", "title": "Branding is not monetization clearance",
+            "detail": "The full video was branded, not newly created. Confirm visual and audio rights, original contribution and Facebook account eligibility before posting."
+        })
+        update_job(job_id, status="completed", progress=100,
+                   note="Full-length branded video ready. Originals preserved.",
+                   clips=[clip], review=review, zip_file=None, transcript="",
+                   clip_length=round(before["duration"], 3),
+                   warnings=["Bajo Mundo TV branding does not establish rights or Facebook monetization eligibility."])
+    except Exception as exc:
+        update_job(job_id, status="failed", progress=0,
+                   note="Unable to brand the video: " + str(exc)[:350])
+
+
+@app.post("/api/brand-only", status_code=202)
+async def submit_brand_only(
+    video: UploadFile = File(...),
+    brand_id: str = Form("bajo-mundo"),
+    logo_position: str = Form("top_right"),
+    crop_top: int = Form(0),
+    crop_bottom: int = Form(0),
+    rights: str = Form("unknown"),
+    audio_rights: str = Form("unknown"),
+    originality: str = Form("unknown"),
+    rights_acknowledged: bool = Form(False),
+    x_access_key: str | None = Header(default=None),
+):
+    protect(x_access_key)
+    if not rights_acknowledged:
+        raise HTTPException(400, "Acknowledge that branding does not grant monetization or reposting rights.")
+    if logo_position not in POSITIONS:
+        raise HTTPException(400, "Choose a valid logo position.")
+    if not (0 <= crop_top <= 25 and 0 <= crop_bottom <= 25 and
+            crop_top + crop_bottom <= 40):
+        raise HTTPException(400, "Edge crop limit is 25% per side or 40% combined.")
+    if rights not in ("unknown", "owned", "licensed", "commentary"):
+        raise HTTPException(400, "Unsupported footage rights selection.")
+    if audio_rights not in AUDIO_RIGHTS or originality not in ORIGINALITY:
+        raise HTTPException(400, "Unsupported audio rights or originality selection.")
+    suffix = Path(video.filename or "").suffix.lower()
+    if suffix not in ALLOWED_VIDEOS:
+        raise HTTPException(400, "Please upload MP4, MOV, MKV, WEBM or M4V.")
+    try:
+        logo_path = brand_path(brand_id)
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(400, "Selected logo profile is unavailable.") from exc
+    if logo_path is None:
+        raise HTTPException(400, "Select a channel profile that has a logo.")
+    # Reserve storage conservatively for uncompressed source and rendered MP4.
+    if shutil.disk_usage(BASE).free < 250 * 1024 * 1024:
+        raise HTTPException(507, "Server storage is low. Download and archive exports first.")
+    job_id = uuid.uuid4().hex[:20]
+    folder = job_dir(job_id)
+    folder.mkdir(mode=0o700, parents=True)
+    try:
+        source = folder / ("source" + suffix)
+        await save_upload(video, source, MAX_UPLOAD)
+        needed_space = max(180 * 1024 * 1024, source.stat().st_size * 2)
+        if shutil.disk_usage(BASE).free < needed_space:
+            raise HTTPException(507, "Not enough server space to safely render this video. Archive previous exports first.")
+        logo_snapshot = folder / "brand.png"
+        shutil.copyfile(logo_path, logo_snapshot)
+        now = int(time.time())
+        channel = next((x["name"] for x in list_brands() if x["id"] == brand_id),
+                       "Selected channel")
+        record = {
+            "id": job_id, "filename": (video.filename or "Video")[:140],
+            "created_at": now, "updated_at": now, "status": "queued",
+            "progress": 1, "note": "Queued for fast full-length branding",
+            "mode": "brand_only", "clip_count": 1, "clip_length": 0,
+            "layout": "original", "captions": "none", "brand_name": "",
+            "rights": rights, "audio_rights": audio_rights,
+            "originality": originality, "target_platform": "facebook_reels",
+            "rights_evidence": "", "brand_id": brand_id, "channel_name": channel,
+            "logo_position": logo_position,
+            "crop_top": crop_top, "crop_bottom": crop_bottom,
+            "source": str(source), "logo": str(logo_snapshot),
+            "review": None, "clips": [], "warnings": [],
+            "zip_file": None, "transcript": ""
+        }
+        save_job(record)
+        cleanup_old_jobs()
+        EXECUTOR.submit(process_brand_only, job_id)
+        return public_job(record)
+    except Exception:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
 
 
 @app.get("/healthz")
@@ -466,7 +584,13 @@ def get_output(job_id: str, filename: str, x_access_key: str | None = Header(def
     file_path = job_dir(job_id) / "outputs" / filename
     if not file_path.is_file():
         raise HTTPException(404, "File not found")
-    return FileResponse(file_path, filename=filename, media_type="application/zip" if filename.endswith(".zip") else "video/mp4")
+    download_name = filename
+    if job.get("mode") == "brand_only" and filename == "clip_01.mp4":
+        base_name = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(job.get("filename", "video")).stem)
+        channel_name = re.sub(r"[^A-Za-z0-9_-]+", "_", job.get("channel_name", "Bajo_Mundo_TV"))
+        download_name = (base_name[:85].strip("_") or "video") + "_" + (channel_name[:35].strip("_") or "Branded") + ".mp4"
+    return FileResponse(file_path, filename=download_name,
+                        media_type="application/zip" if filename.endswith(".zip") else "video/mp4")
 
 
 @app.get("/api/jobs/{job_id}/thumbnails/{clip_filename}")

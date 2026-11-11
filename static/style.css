@@ -373,3 +373,39 @@ body.has-results .studio-hero{display:none}
 .reframe-confirm input{accent-color:var(--lime);margin-top:2px}
 .reframe-tool #reframeStatus{margin:9px 0 0;font-size:10.5px;line-height:1.65;color:#9eb1c0}
 @media(max-width:800px){.reframe-actions{flex-wrap:wrap}.reframe-actions select{min-width:100%;flex-basis:100%}.reframe-actions button{flex:1}.publishing-review .review-flags{grid-template-columns:1fr}}
+
+
+/* V8 — full-length batch branding is the primary, no-cutting flow */
+.brand-quick{background:linear-gradient(145deg,#17221c,#101a20 54%,#0c131c);border:1px solid #4d6741;border-radius:19px;padding:clamp(18px,2.3vw,29px);margin:8px 0 25px;box-shadow:0 15px 45px #0003}
+.brand-quick-head .eyebrow{color:#c6ff78;font-size:10px;font-weight:850;letter-spacing:1.8px}
+.brand-quick-head h2{font-size:clamp(25px,2.6vw,36px);font-weight:880;letter-spacing:-.9px;margin:10px 0 8px}
+.brand-quick-head p{max-width:700px;color:#b1c4c3;line-height:1.7;font-size:12px;margin:0 0 22px}
+.brand-quick-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(230px,1fr);gap:17px}
+.brand-file-drop{background:#101820;border:2px dashed #577b59;border-radius:14px;min-height:205px;padding:23px 17px;display:flex;align-items:center;justify-content:center;flex-direction:column;text-align:center;cursor:pointer;gap:8px;transition:.15s}
+.brand-file-drop.dragging,.brand-file-drop:hover{background:#1c302b;border-color:#c5f968}
+.brand-file-drop:focus-visible{outline:2px solid #ceff70;outline-offset:3px}
+.brand-drop-icon{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;background:#c8fb60;color:#151e0b;font-size:21px;font-weight:900;margin-bottom:4px}
+.brand-file-drop strong{font-size:17px;color:#f2faf3}
+.brand-file-drop p{font-size:11px;color:#a6b7c3;line-height:1.55;margin:0;max-width:95%;overflow-wrap:anywhere}
+.brand-quick-pick{font-size:12px;font-weight:850;color:#d7ffb1;border:1px solid #5c7e46;background:#263423;padding:11px 15px;border-radius:9px;margin-top:5px;cursor:pointer}
+.brand-quick-controls{display:flex;flex-direction:column;gap:8px;background:#111b24;border:1px solid #2f4550;border-radius:14px;padding:18px}
+.brand-quick-controls>label{font-size:11px;font-weight:750;color:#c4d5d6}
+.brand-quick-controls>select,.brand-optional select,.brand-optional input{color:#f2f8f5;font-size:12px;background:#0d141c;border:1px solid #405663;border-radius:9px;min-height:40px;padding:9px 10px;width:100%}
+.brand-quick-controls>select{margin-bottom:8px}
+.brand-optional{background:#16242b;border:1px solid #31434c;border-radius:9px;margin-top:6px;padding:12px}
+.brand-optional summary{cursor:pointer;color:#caedb9;font-size:11px;font-weight:850;line-height:1.5}
+.brand-optional>p{font-size:10px;color:#abb7c4;line-height:1.6;margin:12px 0 0}
+.brand-optional-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+.brand-optional-grid label{display:grid;gap:6px;color:#b4c8d0;font-size:11px;line-height:1.4}
+.brand-optional-grid label:nth-child(n+3){grid-column:span 2}
+.brand-rights-ack{font-size:11px;color:#cbd8d4;display:flex;align-items:flex-start;gap:10px;line-height:1.6;margin:19px 0 12px}
+.brand-rights-ack input{accent-color:#c7fa5e;margin-top:2px;flex-shrink:0}
+.brand-quick-footer{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.brand-quick-footer button{background:#c7fa5e;border:none;color:#16230a;border-radius:10px;font-weight:900;font-size:13px;padding:15px 22px;cursor:pointer;min-width:170px}
+.brand-quick-footer button:disabled{opacity:.48;cursor:not-allowed}
+.brand-quick-footer>div{font-size:11px;flex:1;min-width:180px;color:#a9bdc1;line-height:1.65;overflow-wrap:anywhere}
+@media(max-width:850px){.brand-quick-grid{grid-template-columns:1fr}.brand-file-drop{min-height:168px}.brand-quick-controls{padding:15px}}
+@media(max-width:500px){.brand-quick{padding:15px}.brand-quick-head h2{font-size:25px}.brand-quick-footer button{width:100%}.brand-optional-grid{grid-template-columns:1fr}.brand-optional-grid label:nth-child(n+3){grid-column:auto}}
+
+/* Keep the focused editor invisible when a saved project is being reviewed. */
+body.has-results:not(.show-editor) .brand-quick{display:none}

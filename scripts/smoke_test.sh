@@ -229,4 +229,69 @@ docker exec "$NAME" ffprobe -v error -select_streams v:0 \
   "/data/$id/outputs/clip_01.mp4" > "$DIR/dimensions.txt"
 grep -Fxq "1080,1920" "$DIR/dimensions.txt"
 
+# Full-length branding uses the SAME full synthetic source and does not cut scenes.
+code="$(curl -sS -o /dev/null -w '%{http_code}' \
+  -F "video=@$DIR/source.mp4" -F "rights_acknowledged=true" \
+  "$URL/api/brand-only")"
+test "$code" = "401"
+code="$(curl -sS -H "X-Access-Key: $TOKEN" -o /dev/null -w '%{http_code}' \
+  -F "video=@$DIR/source.mp4" \
+  "$URL/api/brand-only")"
+test "$code" = "400"
+curl -fsS -H "X-Access-Key: $TOKEN" \
+  -F "video=@$DIR/source.mp4" -F "brand_id=bajo-mundo" \
+  -F "rights_acknowledged=true" -F "logo_position=top_right" \
+  -F "rights=unknown" -F "audio_rights=unknown" \
+  "$URL/api/brand-only" > "$DIR/brand-submit.json"
+brand_id="$(python - "$DIR/brand-submit.json" <<'PY'
+import json,sys
+job=json.load(open(sys.argv[1]))
+assert job["mode"] == "brand_only"
+assert job["brand_id"] == "bajo-mundo"
+print(job["id"])
+PY
+)"
+full_done=0
+for _ in $(seq 1 90); do
+  curl -fsS -H "X-Access-Key: $TOKEN" "$URL/api/jobs/$brand_id" > "$DIR/brand-job.json"
+  brand_state="$(python - "$DIR/brand-job.json" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1]))["status"])
+PY
+)"
+  if [[ "$brand_state" == "completed" ]]; then
+    full_done=1
+    break
+  elif [[ "$brand_state" == "failed" ]]; then
+    cat "$DIR/brand-job.json"
+    exit 1
+  fi
+  sleep 2
+done
+test "$full_done" = "1"
+python - "$DIR/brand-job.json" <<'PY'
+import json,sys
+job=json.load(open(sys.argv[1]))
+assert job["mode"] == "brand_only"
+assert job["zip_file"] is None, "Do not duplicate MP4 storage for batch branding"
+assert len(job["clips"]) == 1
+assert job["clips"][0]["technical"]["verified"]
+assert job["clips"][0]["technical"]["full_length"]
+assert job["review"]["monetization_guaranteed"] is False
+assert job["clips"][0]["captions"] is False
+assert abs(job["clips"][0]["length"] - 4) < 1.0
+PY
+curl -fsS -H "X-Access-Key: $TOKEN" \
+  "$URL/api/jobs/$brand_id/files/clip_01.mp4" -o "$DIR/brand-full.mp4"
+docker exec "$NAME" ffprobe -v error -show_entries \
+  format=duration:stream=codec_type,width,height -of json \
+  "/data/$brand_id/outputs/clip_01.mp4" > "$DIR/brand-probe.json"
+python - "$DIR/brand-probe.json" <<'PY'
+import json,sys
+media=json.load(open(sys.argv[1]))
+video=next(x for x in media["streams"] if x["codec_type"]=="video")
+assert (video["width"],video["height"])==(320,180),video
+assert abs(float(media["format"]["duration"])-4)<.6
+PY
+
 echo "Shorts Factory container smoke test passed."
