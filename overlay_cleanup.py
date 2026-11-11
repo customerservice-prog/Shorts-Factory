@@ -92,6 +92,8 @@ def suggest_text_masks(source, duration):
     stamps = sorted({round(min(max(0.1, duration*p), max(0.1,duration-0.3)),2)
                      for p in (0.12, 0.48, 0.84)})
     observations = []
+    recognized_words = []
+    frame_paths = []
     with tempfile.TemporaryDirectory() as td:
         for index, stamp in enumerate(stamps):
             frame = Path(td) / f"frame_{index}.png"
@@ -99,6 +101,7 @@ def suggest_text_masks(source, duration):
                 _sample_frame(source, stamp, frame)
                 if not frame.is_file():
                     continue
+                frame_paths.append(frame)
                 from PIL import Image
                 with Image.open(frame) as im:
                     width, height = im.size
@@ -116,6 +119,7 @@ def suggest_text_masks(source, duration):
                                       ("left","top","width","height"))
                         if confidence < 58 or len(text) < 2 or w < 5:
                             continue
+                        recognized_words.append(text.lower())
                         key = (word["block_num"],word["par_num"],word["line_num"])
                         lines.setdefault(key,[]).append((x,y,w,h,text,confidence))
                     except (ValueError,TypeError,KeyError):
@@ -136,6 +140,7 @@ def suggest_text_masks(source, duration):
                                          round(sum(e[5] for e in entries)/len(entries))))
             except (OSError, ValueError, subprocess.SubprocessError):
                 continue
+        static_candidates = possible_static_graphic_zones(frame_paths)
     suggestions = []
     # One suggestion per repeated approximate text position, not the words
     # themselves (captions may change during the video).
@@ -164,7 +169,63 @@ def suggest_text_masks(source, duration):
         result.append(bbox)
         if len(result) >= MAX_MASKS:
             break
-    return {"regions":result,
-            "message":"Suggestions find persistent text-like regions only. Review every marked box: real scene text may be included, and non-text logos may be missed.",
-            "requires_confirmation":True,
-            "method":"frame-sampled OCR"}
+    labels = " ".join(recognized_words)
+    possible_brand = any(key in labels for key in (
+        "buho", "búho", "show tv", "suscrib", "subscribe",
+        "youtube", "canal", "follow", "síguenos"))
+    possible_own_brand = ("bajo" in labels and "mundo" in labels)
+    area = sum(item["w"] * item["h"] for item in result) / 100.0
+    heavy = area >= 12 or len(result) >= 5
+    return {
+        "regions": result,
+        "review_candidates": static_candidates,
+        "suspected_prior_branding": bool(possible_brand or result or static_candidates),
+        "possible_existing_bajo_logo": possible_own_brand,
+        "cleanup_difficulty": "heavy" if heavy else
+                              ("review" if result or static_candidates else "unknown"),
+        "message": "Text regions and possible fixed corner graphics were detected. Some may be part of the scene. Review and approve boxes before removal; missed watermarks can remain.",
+        "requires_confirmation": True, "method": "frame-sampled OCR and static-area review"
+    }
+
+
+def possible_static_graphic_zones(frames):
+    """Conservative review-only markers for stationary corner/lower-third art.
+
+    No pixel is erased on this evidence alone. A static studio or paused camera
+    can look identical to an overlay, so the user MUST inspect every marker.
+    """
+    from PIL import Image, ImageChops, ImageFilter, ImageStat
+    if len(frames) < 3:
+        return []
+    images = []
+    for path in frames:
+        try:
+            with Image.open(path) as image:
+                images.append(image.convert("L").resize((160, 280)))
+        except OSError:
+            continue
+    if len(images) < 3:
+        return []
+    motion = Image.new("L", images[0].size, color=0)
+    for image in images[1:]:
+        motion = ImageChops.lighter(motion, ImageChops.difference(images[0], image))
+    edge = images[0].filter(ImageFilter.FIND_EDGES)
+    # Small, plausible locations rather than auto-masking entire halves.
+    zones = [
+        (2, 2, 33, 16), (65, 2, 33, 16),
+        (2, 75, 35, 18), (63, 75, 35, 18),
+        (28, 75, 45, 18), (30, 42, 40, 17),
+    ]
+    result = []
+    for x, y, w, h in zones:
+        region = tuple(round(v) for v in (
+            160*x/100, 280*y/100, 160*(x+w)/100, 280*(y+h)/100
+        ))
+        if ImageStat.Stat(motion.crop(region)).mean[0] > 28:
+            continue
+        if ImageStat.Stat(edge.crop(region)).mean[0] < 24:
+            continue
+        result.append({"x": float(x), "y": float(y),
+                       "w": float(w), "h": float(h),
+                       "type": "static_graphic_possible"})
+    return result[:4]
