@@ -79,6 +79,8 @@
     video.removeAttribute("src");
     video.load();
     video.classList.add("hidden");
+    $("featuredPoster").classList.remove("hidden");
+    $("stageBackdrop").classList.remove("hidden");
     if (previewVideoUrl) URL.revokeObjectURL(previewVideoUrl);
     previewVideoUrl = null;
     $("stageLoading").classList.add("hidden");
@@ -241,6 +243,17 @@
       ". This is not a monetization approval." :
       "Technical export has not been verified.";
     destination.appendChild(tech);
+    if (job.mode === "brand_only") {
+      const quality = document.createElement("p");
+      quality.className = "cleanup-quality " +
+        (clip.technical?.cleanup_region_count ? "needs-review" : "unknown");
+      const regions = clip.technical?.cleanup_region_count || 0;
+      quality.textContent = regions ?
+        "CLEANUP ATTEMPTED — " + regions +
+          " on-video area(s) reconstructed. This DOES NOT certify old logos are gone. Watch every second before publishing." :
+        "NO VERIFIED GRAPHIC REMOVAL — Existing embedded branding may still be present. A new Bajo Mundo logo does not clean the footage.";
+      destination.appendChild(quality);
+    }
     const list = document.createElement("ul");
     const findings = report.checks || [];
     for (const flag of findings) {
@@ -615,6 +628,7 @@
     $("resultsTitle").textContent = fullVideo ? "Your full branded video" : "Meet your new shorts";
     $("galleryTitle").textContent = fullVideo ? "Full-length export" : "All clips";
     $("reframeTool").classList.toggle("hidden", fullVideo);
+    $("savedSmartClean").classList.remove("hidden");
     $("downloadAll").textContent = fullVideo ? "↓ Download full MP4" : "↓ Download all ZIP";
     $("resultsCount").textContent = (job.clips || []).length + (fullVideo ? " video" : " clips");
     $("stageQueueCount").textContent = (job.clips || []).length + (fullVideo ? " video" : " clips");
@@ -686,6 +700,8 @@
       previewVideoUrl = URL.createObjectURL(blob);
       const player = $("featuredVideo");
       player.src = previewVideoUrl;
+      $("featuredPoster").classList.add("hidden");
+      $("stageBackdrop").classList.add("hidden");
       player.classList.remove("hidden");
       $("stageLoading").classList.add("hidden");
       player.play().catch(() => { /* Browser may require tapping play. */ });
@@ -1052,6 +1068,38 @@
     });
   }
 
+
+  async function cleanAndRebrandSaved() {
+    const job = jobs.find(item => item.id === selectedJobId);
+    if (!job || job.status !== "completed")
+      return toast("Open a saved completed video first.");
+    if (!$("savedCleanPermission").checked)
+      return toast("Confirm you have permission to rebrand this source footage.");
+    const button = $("savedCleanBtn");
+    button.disabled = true;
+    $("savedCleanState").textContent = "Creating a separate project; scanning old graphics from the original upload…";
+    const form = new FormData();
+    form.append("source_rights_confirmed", "true");
+    form.append("auto_cleanup", "true");
+    try {
+      const result = await (await api(
+        "/api/jobs/" + encodeURIComponent(job.id) + "/clean-rebrand",
+        {method:"POST",body:form}
+      )).json();
+      $("savedCleanState").textContent =
+        "New project " + result.id + " queued. Original video and previous export are preserved. Inspect the new result before posting.";
+      await refreshJobs();
+      showPage("library", false);
+      $("pageLibrary").scrollIntoView({behavior:"smooth",block:"start"});
+      toast("New Bajo Mundo TV edit queued. Check My exports for cleanup review.");
+    } catch(error) {
+      $("savedCleanState").textContent = error.message;
+      toast("Unable to rebrand saved source: " + error.message);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function pickBrandBatchFiles(files) {
     if (brandBatchBusy) return;
     const all = Array.from(files || []);
@@ -1075,7 +1123,9 @@
   }
   function updateBrandBatchButton() {
     const b = $("brandBatchSubmit");
-    b.disabled = brandBatchBusy || !brandBatchFiles.length || !$("brandRightsAcknowledged").checked;
+    b.disabled = brandBatchBusy || !brandBatchFiles.length ||
+      !$("brandRightsAcknowledged").checked ||
+      ($("autoCleanup").checked && !$("cleanupAuthorized").checked);
     b.textContent = brandBatchBusy ? "Uploading batch…" :
       "Brand " + (brandBatchFiles.length || "full") +
       (brandBatchFiles.length === 1 ? " video ↗" : " full videos ↗");
@@ -1086,8 +1136,8 @@
     const top = Number($("brandCropTop").value), bottom = Number($("brandCropBottom").value);
     if (![top,bottom].every(n => Number.isInteger(n) && n >= 0 && n <= 25) || top + bottom > 40)
       return toast("Crop 0–25% per edge, maximum 40% combined.");
-    if(cleanupRegions.length && !$("cleanupAuthorized").checked)
-      return toast("Confirm you own or have permission to edit the selected old graphics.");
+    if((cleanupRegions.length || $("autoCleanup").checked) && !$("cleanupAuthorized").checked)
+      return toast("Confirm permission to remove old on-screen graphics before continuing.");
     brandBatchBusy = true; updateBrandBatchButton();
     const queue = brandBatchFiles.slice(), total = queue.length, failures = [];
     let sent = 0, processed = 0;
@@ -1107,6 +1157,7 @@
         form.append("release_reference", $("brandReleaseReference").value);
         form.append("cleanup_regions", JSON.stringify(cleanupRegions));
         form.append("cleanup_authorized", $("cleanupAuthorized").checked ? "true":"false");
+        form.append("auto_cleanup", $("autoCleanup").checked ? "true" : "false");
         form.append("crop_top", String(top));
         form.append("crop_bottom", String(bottom));
         form.append("rights", $("brandOnlyRights").value);
@@ -1136,6 +1187,8 @@
   }
   function setupBrandOnly() {
     setupCleanupEditor();
+    $("autoCleanup").addEventListener("change",updateBrandBatchButton);
+    $("cleanupAuthorized").addEventListener("change",updateBrandBatchButton);
     $("brandOnlyProfile").addEventListener("change", () => updateFullVideoPreview(true));
     for (const id of ["brandOnlyPosition", "brandLogoSize", "brandLogoOpacity",
                       "brandLogoAlreadyEmbedded", "brandSubtitleMode",
@@ -1208,6 +1261,7 @@
       else if (job?.zip_file) download(job.id, job.zip_file);
     });
     $("stagePlay").addEventListener("click", playSelectedClip);
+    $("savedCleanBtn").addEventListener("click",cleanAndRebrandSaved);
     $("reframeBtn").addEventListener("click", createFocusedVersion);
     $("stageDownload").addEventListener("click", () => {
       const job = jobs.find(j => j.id === selectedJobId);
