@@ -922,7 +922,8 @@
       item.style.left=box.x+"%"; item.style.top=box.y+"%";
       item.style.width=box.w+"%"; item.style.height=box.h+"%";
       const caption=document.createElement("span");
-      caption.textContent = (suggested?"Suggestion ":"Remove ") + (index+1);
+      caption.textContent = (suggested?
+        (box.kind === "possible_logo" ? "Possible logo " : "Text ") : "Remove ") + (index+1);
       item.appendChild(caption);
       if (!suggested) {
         const remove=document.createElement("button");
@@ -1048,12 +1049,20 @@
       try{
         const data=new FormData();data.append("video",file,file.name);
         const result=await (await api("/api/cleanup/suggest",{method:"POST",body:data})).json();
-        cleanupSuggestions=(result.regions||[]).filter(allowedCleanupBox).slice(0,6);
+        const textMasks=(result.regions||[]).filter(allowedCleanupBox)
+          .map(box=>({...box,kind:"text"}));
+        const imageMasks=(result.review_candidates||[]).filter(allowedCleanupBox)
+          .map(box=>({...box,kind:"possible_logo"}));
+        cleanupSuggestions=[...textMasks,...imageMasks]
+          .filter((box,index,array)=>!array.slice(0,index).some(prev=>
+            Math.abs(prev.x-box.x)<7 && Math.abs(prev.y-box.y)<7))
+          .slice(0,6);
         renderCleanupBoxes();
         $("cleanupApplySuggestions").classList.toggle("hidden",!cleanupSuggestions.length);
         cleanupInfo(cleanupSuggestions.length?
-          cleanupSuggestions.length+" possible text area(s) found. Inspect the boxes, then click Apply suggestions to include them. Real objects may be mistaken for graphics.":
-          "No reliable text overlays found. Scrub the video and draw over unwanted logos or captions manually.");
+          textMasks.length+" likely text area(s) plus "+imageMasks.length+
+          " possible stationary-graphic area(s). Review each box before applying. Static real-world objects and faces can also trigger suggestions.":
+          "No confident old-branding areas found. That does NOT certify the source as clean; scrub the video and draw boxes if needed.");
       }catch(error) {
         cleanupInfo("Automatic detection wasn't reliable: "+error.message+". Draw boxes manually.");
       }finally{button.disabled=false}
