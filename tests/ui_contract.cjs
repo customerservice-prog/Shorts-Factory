@@ -21,7 +21,9 @@ for (const id of ["results", "clipsGrid", "clipQueue", "featuredVideo", "feature
   "resultsTitle", "galleryTitle", "reframeTool", "watermarkPreviewImg",
   "watermarkDemo", "brandLogoSize", "brandLogoOpacity",
   "brandLogoSizeValue", "brandLogoOpacityValue", "brandLogoAlreadyEmbedded",
-  "watermarkPreviewMessage"]) {
+  "watermarkPreviewMessage", "brandSubtitleMode", "brandSubtitleStyle",
+  "brandFollowBanner", "showBannerDemo", "showCaptionDemo",
+  "brandPerformancePermission", "brandReleaseReference"]) {
   assert.ok(ids.includes(id), "Review studio lacks: " + id);
 }
 
@@ -56,3 +58,9 @@ assert.ok(script.includes('form.append("logo_size"'), "Size control not passed t
 assert.ok(script.includes('form.append("logo_opacity"'), "Opacity control not passed to backend");
 assert.ok(script.includes('form.append("logo_already_embedded"'), "Double logo prevention missing");
 assert.ok(backend.includes('"default": "bajo-mundo-studio"'), "New default brand not enabled");
+
+assert.ok(script.includes('form.append("subtitle_mode"'), "Subtitle choice must reach renderer");
+assert.ok(script.includes('form.append("follow_banner"'), "Follow banner choice missing");
+assert.ok(script.includes('form.append("performance_permission"'), "Artist permission review missing");
+assert.ok(backend.includes('performance_permission: str = Form("unknown")'), "Performance permission not checked");
+assert.ok(html.includes('Bajo Mundo TV · Original logo'), "Original channel logo must remain default");
