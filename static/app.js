@@ -734,7 +734,11 @@
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = file;
+      const job = jobs.find(j => j.id === jobId);
+      const safe = text => String(text || "").replace(/[^A-Za-z0-9_-]+/g,"_").replace(/^_+|_+$/g,"");
+      anchor.download = job?.mode === "brand_only" && file === "clip_01.mp4" ?
+        (safe(job.filename.replace(/\.[^.]+$/, "")).slice(0,85) || "video") + "_" +
+        (safe(job.channel_name).slice(0,35) || "Bajo_Mundo_TV") + ".mp4" : file;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
