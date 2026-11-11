@@ -160,6 +160,11 @@
             <div class="brand-quick-controls">
               <label for="brandOnlyProfile">Apply this channel logo</label>
               <select id="brandOnlyProfile"><option value="bajo-mundo" selected>Bajo Mundo TV · Original logo</option><option value="bajo-mundo-studio">Bajo Mundo TV · Alternative watermark</option></select>
+              <div class="brand-custom-upload">
+                <input id="brandCustomLogoFile" type="file" accept=".png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp" hidden>
+                <button type="button" id="brandCustomLogoBtn" class="brand-quick-pick">＋ Upload logo image</button>
+                <p id="brandCustomLogoStatus" role="status">Choose a PNG, JPG or WEBP (up to 8 MB). Saved logos appear in the menu above for future videos.</p>
+              </div>
               <div class="watermark-preview" aria-label="Live video watermark preview">
                 <div class="watermark-demo" id="watermarkDemo">
                   <span class="watermark-demo-label">LIVE LOGO PREVIEW</span>
