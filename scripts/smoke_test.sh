@@ -257,7 +257,7 @@ curl -fsS -H "X-Access-Key: $TOKEN" \
   -F "subtitle_mode=none" -F "subtitle_style=show" \
   -F "follow_banner=true" -F "performance_permission=unknown" \
   -F 'cleanup_regions=[{"x":5,"y":5,"w":20,"h":10}]' \
-  -F "cleanup_authorized=true" \
+  -F "cleanup_authorized=true" -F "auto_cleanup=true" \
   -F "rights=unknown" -F "audio_rights=unknown" \
   "$URL/api/brand-only" > "$DIR/brand-submit.json"
 brand_id="$(python - "$DIR/brand-submit.json" <<'PY'
@@ -298,6 +298,9 @@ assert job["clips"][0]["technical"]["verified"]
 assert job["clips"][0]["technical"]["full_length"]
 assert job["clips"][0]["technical"]["follow_banner"]
 assert job["clips"][0]["technical"]["cleanup_region_count"] == 1
+assert job["clips"][0]["technical"]["auto_cleanup_requested"] is True
+assert job["cleanup_status"] == "needs_visual_review"
+assert job.get("source_scan") is not None
 assert job["clips"][0]["technical"]["logo_added"]
 assert job["clips"][0]["technical"]["logo_size"] == 33
 assert job["clips"][0]["captions"] is False
@@ -317,6 +320,53 @@ video=next(x for x in media["streams"] if x["codec_type"]=="video")
 assert (video["width"],video["height"])==(320,180),video
 assert abs(float(media["format"]["duration"])-4)<.6
 PY
+
+# Existing saved video can create a fresh independent rebrand job.
+code="$(curl -sS -o /dev/null -w '%{http_code}' \
+ -F "source_rights_confirmed=true" "$URL/api/jobs/$brand_id/clean-rebrand")"
+test "$code" = "401"
+code="$(curl -sS -o /dev/null -w '%{http_code}' -H "X-Access-Key: $TOKEN" \
+ -F "source_rights_confirmed=false" "$URL/api/jobs/$brand_id/clean-rebrand")"
+test "$code" = "400"
+curl -fsS -H "X-Access-Key: $TOKEN" \
+ -F "source_rights_confirmed=true" -F "auto_cleanup=true" \
+ "$URL/api/jobs/$brand_id/clean-rebrand" > "$DIR/rebrand-submit.json"
+rebrand_id="$(python - "$DIR/rebrand-submit.json" <<'PY'
+import json,sys
+j=json.load(open(sys.argv[1]))
+assert j["source_job_id"]
+assert j["brand_id"] == "bajo-mundo"
+assert j["auto_cleanup"] is True
+print(j["id"])
+PY
+)"
+test "$rebrand_id" != "$brand_id"
+rebrand_ok=0
+for _ in $(seq 1 100); do
+  curl -fsS -H "X-Access-Key: $TOKEN" \
+    "$URL/api/jobs/$rebrand_id" > "$DIR/rebrand-job.json"
+  state="$(python - "$DIR/rebrand-job.json" <<'PY'
+import json,sys
+print(json.load(open(sys.argv[1]))["status"])
+PY
+)"
+  if [[ "$state" == "completed" ]]; then
+    rebrand_ok=1; break
+  elif [[ "$state" == "failed" ]]; then
+    cat "$DIR/rebrand-job.json"; exit 1
+  fi
+  sleep 2
+done
+test "$rebrand_ok" = "1"
+python - "$DIR/rebrand-job.json" <<'PY'
+import json,sys
+j=json.load(open(sys.argv[1]))
+assert j["clips"][0]["technical"]["verified"]
+assert j["source_scan"]["requires_confirmation"] is True
+assert j["clips"][0]["technical"]["auto_cleanup_requested"] is True
+assert j["clips"][0]["technical"]["full_length"]
+PY
+test -s "$DIR/brand-full.mp4"
 
 # OCR suggestions require authentication and never modify the source.
 curl -fsS --max-time 90 -H "X-Access-Key: $TOKEN" \

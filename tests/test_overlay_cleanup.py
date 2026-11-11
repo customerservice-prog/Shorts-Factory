@@ -86,7 +86,10 @@ class CleanupIntegrationTests(unittest.TestCase):
             report=suggest_text_masks(original,1)
             self.assertTrue(report["requires_confirmation"])
             self.assertIsInstance(report["regions"],list)
-            self.assertEqual(report["method"],"frame-sampled OCR")
+            self.assertIn("OCR", report["method"])
+            self.assertIn("review_candidates", report)
+            self.assertIn("cleanup_difficulty", report)
+            self.assertTrue(report["requires_confirmation"])
 
 
 if __name__=="__main__":

@@ -154,11 +154,42 @@ def process_brand_only(job_id: str):
         outputs.mkdir(exist_ok=True)
         target = outputs / "clip_01.mp4"
         before = probe_media(job["source"])
+        auto_scan = None
+        approved_masks = list(job.get("cleanup_regions", []))
+        processing_warnings = []
+        if job.get("auto_cleanup"):
+            update_job(job_id, status="analyzing", progress=9,
+                       note="Scanning original frames for old logos, text and branded graphics...")
+            try:
+                auto_scan = suggest_text_masks(job["source"], before["duration"])
+                # Explicit consent enables conservative automatic text-region cleanup.
+                # Static/PiP graphic hints remain review-only because backgrounds
+                # can be mistaken for watermarks.
+                if job.get("cleanup_authorized") and not approved_masks:
+                    approved_masks = auto_scan.get("regions", [])[:6]
+                if auto_scan.get("review_candidates"):
+                    processing_warnings.append(
+                        "Possible embedded graphics remain outside automatically detected text. Review the source and final video; a clean rebrand is NOT verified.")
+                if auto_scan.get("possible_existing_bajo_logo"):
+                    processing_warnings.append(
+                        "The source may already have Bajo Mundo branding. Check for duplicate logos.")
+                if auto_scan.get("cleanup_difficulty") == "heavy":
+                    processing_warnings.append(
+                        "This source has extensive on-screen text; automatic cleanup may visibly smear the picture.")
+                if not approved_masks and auto_scan.get("suspected_prior_branding"):
+                    processing_warnings.append(
+                        "Old branding may still be visible. No confidently removable text area was found.")
+                update_job(job_id, source_scan=auto_scan,
+                           cleanup_regions_applied=approved_masks)
+            except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                processing_warnings.append(
+                    "Automatic overlay analysis failed. Unwanted logos may remain; inspect before publishing.")
+                update_job(job_id, source_scan={"error":"scan_unavailable"},
+                           cleanup_regions_applied=approved_masks)
         captions_path = None
         follow_banner = None
         language = ""
         words = []
-        processing_warnings = []
         if job.get("subtitle_mode") == "auto":
             if not before["has_audio"]:
                 processing_warnings.append("Source has no audio; automatic subtitles were skipped.")
@@ -201,8 +232,14 @@ def process_brand_only(job_id: str):
             logo_size=job.get("logo_size", 30),
             logo_opacity=job.get("logo_opacity", 100),
             subtitle_file=captions_path, follow_banner=follow_banner,
-            cleanup_regions=job.get("cleanup_regions", [])
+            cleanup_regions=approved_masks
         )
+        technical["source_cleanliness"] = (
+            "needs_visual_review" if approved_masks or
+            (auto_scan and auto_scan.get("suspected_prior_branding")) else
+            "not_certified"
+        )
+        technical["auto_cleanup_requested"] = bool(job.get("auto_cleanup"))
         update_job(job_id, progress=93, note="Verifying full video duration and audio...")
         clip = {
             "file": "clip_01.mp4",
@@ -227,6 +264,12 @@ def process_brand_only(job_id: str):
                 "level": "high", "title": "Artist/performance release not confirmed",
                 "detail": "Get permission for commercial publishing and editing from the relevant performer/rightsholder; also verify recording and composition rights separately."
             })
+        if auto_scan and auto_scan.get("suspected_prior_branding"):
+            review["source_findings"].append({
+                "level": "high", "title": "Possible previous branding detected",
+                "detail": "Automatic detection cannot prove removal of all old logos, picture-in-picture boxes, or on-video text. Inspect the rendered result; if heavily covered, use unbranded camera footage."
+            })
+            review["status"] = "high_risk"
         if technical.get("cleanup_region_count", 0):
             review["source_findings"].append({
                 "level": "review",
@@ -241,6 +284,7 @@ def process_brand_only(job_id: str):
         update_job(job_id, status="completed", progress=100,
                    note="Full-length branded video ready. Originals preserved.",
                    clips=[clip], review=review, zip_file=None,
+                   cleanup_status=technical["source_cleanliness"],
                    transcript=" ".join(w["text"] for w in words)[:60000],
                    clip_length=round(before["duration"], 3),
                    warnings=processing_warnings + [
@@ -266,6 +310,7 @@ async def submit_brand_only(
     release_reference: str = Form(""),
     cleanup_regions: str = Form("[]"),
     cleanup_authorized: bool = Form(False),
+    auto_cleanup: bool = Form(False),
     crop_top: int = Form(0),
     crop_bottom: int = Form(0),
     rights: str = Form("unknown"),
@@ -289,8 +334,8 @@ async def submit_brand_only(
         masks = normalize_masks(cleanup_regions)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if masks and not cleanup_authorized:
-        raise HTTPException(400, "Confirm you may edit the selected old graphics.")
+    if (masks or auto_cleanup) and not cleanup_authorized:
+        raise HTTPException(400, "Confirm your permission before automatic or manual graphic removal.")
     if not (15 <= logo_size <= 40 and 60 <= logo_opacity <= 100):
         raise HTTPException(400, "Watermark size or opacity is outside safe limits.")
     if not (0 <= crop_top <= 25 and 0 <= crop_bottom <= 25 and
@@ -345,6 +390,7 @@ async def submit_brand_only(
             "release_reference": release_reference.strip(),
             "cleanup_regions": masks,
             "cleanup_authorized": bool(cleanup_authorized),
+            "auto_cleanup": bool(auto_cleanup),
             "crop_top": crop_top, "crop_bottom": crop_bottom,
             "source": str(source), "logo": str(logo_snapshot) if logo_snapshot else None,
             "review": None, "clips": [], "warnings": [],
@@ -353,6 +399,76 @@ async def submit_brand_only(
         save_job(record)
         cleanup_old_jobs()
         EXECUTOR.submit(process_brand_only, job_id)
+        return public_job(record)
+    except Exception:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+
+
+
+@app.post("/api/jobs/{job_id}/clean-rebrand", status_code=202)
+def clean_rebrand_saved_source(
+    job_id: str,
+    source_rights_confirmed: bool = Form(False),
+    auto_cleanup: bool = Form(True),
+    x_access_key: str | None = Header(default=None),
+):
+    """Create a NEW non-destructive Bajo Mundo TV export from an existing upload.
+
+    Explicit editing rights confirmation required. A video with old baked-in
+    graphics can still need manual cleanup; nothing is certified or published.
+    """
+    protect(x_access_key)
+    if not source_rights_confirmed:
+        raise HTTPException(400, "Confirm you have permission to edit and rebrand the source.")
+    original = read_job(job_id)
+    if original.get("status") != "completed":
+        raise HTTPException(409, "The source project is not completed.")
+    src = Path(original.get("source") or "")
+    if not src.is_file() or src.is_symlink():
+        raise HTTPException(409, "Saved original video unavailable. Re-upload the source.")
+    if src.suffix.lower() not in ALLOWED_VIDEOS:
+        raise HTTPException(400, "Unsupported original video format.")
+    if shutil.disk_usage(BASE).free < max(180*1024*1024, src.stat().st_size):
+        raise HTTPException(507, "Insufficient space to render the new copy.")
+    fresh_id = uuid.uuid4().hex[:20]
+    folder = job_dir(fresh_id)
+    folder.mkdir(parents=True, mode=0o700)
+    try:
+        dst = folder / ("source" + src.suffix.lower())
+        # Avoid duplicating the video on the same persistent volume.
+        try:
+            os.link(src, dst)
+        except OSError:
+            shutil.copyfile(src, dst)
+        logo = folder / "brand.png"
+        shutil.copyfile(brand_path("bajo-mundo"), logo)
+        now = int(time.time())
+        record = {
+            "id": fresh_id, "filename": original.get("filename", "video"),
+            "created_at": now, "updated_at": now,
+            "status": "queued", "progress": 1,
+            "note": "Analyzing old graphics before creating separate Bajo Mundo version",
+            "mode": "brand_only", "source_job_id": job_id,
+            "source": str(dst), "logo": str(logo),
+            "logo_position": "top_right", "logo_size": 24,
+            "logo_opacity": 100, "logo_already_embedded": False,
+            "brand_id": "bajo-mundo", "channel_name": "Bajo Mundo TV",
+            "subtitle_mode": "none", "subtitle_style": "show",
+            "follow_banner": False, "performance_permission": "unknown",
+            "rights": original.get("rights", "unknown"),
+            "audio_rights": original.get("audio_rights", "unknown"),
+            "originality": original.get("originality", "unknown"),
+            "target_platform": "facebook_reels",
+            "cleanup_regions": [], "cleanup_authorized": True,
+            "auto_cleanup": bool(auto_cleanup),
+            "crop_top": 0, "crop_bottom": 0,
+            "clip_count": 1, "clips": [], "warnings": [],
+            "review": None, "zip_file": None, "transcript": "",
+            "brand_name": "", "layout": "original", "captions": "none"
+        }
+        save_job(record)
+        EXECUTOR.submit(process_brand_only, fresh_id)
         return public_job(record)
     except Exception:
         shutil.rmtree(folder, ignore_errors=True)

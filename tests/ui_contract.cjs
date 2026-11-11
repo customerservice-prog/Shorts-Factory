@@ -73,3 +73,11 @@ assert.ok(script.includes('form.append("cleanup_regions"'), "Cleanup geometry mu
 assert.ok(script.includes('form.append("cleanup_authorized"'), "Cleanup rights confirmation must reach the backend");
 assert.ok(script.includes("/api/cleanup/suggest"), "Smart OCR suggestion endpoint not wired");
 assert.ok(backend.includes('@app.post("/api/cleanup/suggest")'), "Smart overlay suggestions route missing");
+
+assert.ok(html.includes('id="autoCleanup"'), "Automatic brand cleanup must be offered");
+assert.ok(html.includes('id="savedCleanBtn"'), "Saved videos must expose one-click cleanup");
+assert.ok(script.includes('form.append("auto_cleanup"'), "Auto cleanup selection must reach server");
+assert.ok(script.includes('cleanAndRebrandSaved'), "Saved source cleanup action must be wired");
+assert.ok(backend.includes('@app.post("/api/jobs/{job_id}/clean-rebrand"'), "Saved-video rebrand API missing");
+assert.ok(script.includes('featuredPoster").classList.add("hidden")'), "Hide preview poster during playback to prevent doubled image");
+assert.ok(script.includes('cleanup_status'), "Add source graphic cleanup status to editor");
