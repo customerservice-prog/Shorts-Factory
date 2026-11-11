@@ -9,6 +9,8 @@
   let layout = "fill";
   let channelProfiles = [];
   let brandPreviewUrl = null;
+  let brandBatchFiles = [];
+  let brandBatchBusy = false;
   let currentPreview = null;
   let toastTimer = null;
 
@@ -126,6 +128,15 @@
     const custom = document.createElement("option");
     custom.value = "new"; custom.textContent = "+ Add another channel";
     select.appendChild(custom); select.value = safe;
+    const batch = $("brandOnlyProfile"), old = batch.value;
+    batch.replaceChildren();
+    for (const brand of channelProfiles.filter(item => item.logo_url)) {
+      const option = document.createElement("option");
+      option.value = brand.id; option.textContent = brand.name;
+      batch.appendChild(option);
+    }
+    batch.value = channelProfiles.some(p => p.id === old && p.logo_url) ? old :
+      (channelProfiles.some(p => p.id === safe && p.logo_url) ? safe : "bajo-mundo");
     await updateBrandPreview();
   }
 
@@ -214,8 +225,11 @@
     destination.appendChild(headline);
     const tech = document.createElement("p");
     tech.textContent = clip.technical?.verified ?
-      "TECHNICAL PASS — 1080 × 1920 H.264" + (clip.technical.audio ? " · AAC audio" : "") +
-      " · " + clock(clip.technical.duration) + ". This is not a monetization approval." :
+      "TECHNICAL PASS — " + clip.technical.width + " × " + clip.technical.height +
+      " H.264" + (clip.technical.audio ? " · Audio preserved" : " · No audio") +
+      " · " + clock(clip.technical.duration) +
+      (job.mode === "brand_only" ? " · Complete video preserved" : "") +
+      ". This is not a monetization approval." :
       "Technical export has not been verified.";
     destination.appendChild(tech);
     const list = document.createElement("ul");
@@ -583,11 +597,16 @@
     $("results").classList.remove("hidden");
     document.body.classList.add("has-results");
     document.body.classList.remove("show-editor");
-    $("editorHeadline").textContent = "Create your next batch";
-    $("resultsCount").textContent = (job.clips || []).length + " clips";
-    $("stageQueueCount").textContent = (job.clips || []).length + " clips";
+    $("editorHeadline").textContent = "Create highlight clips instead";
+    const fullVideo = job.mode === "brand_only";
+    $("resultsTitle").textContent = fullVideo ? "Your full branded video" : "Meet your new shorts";
+    $("galleryTitle").textContent = fullVideo ? "Full-length export" : "All clips";
+    $("reframeTool").classList.toggle("hidden", fullVideo);
+    $("downloadAll").textContent = fullVideo ? "↓ Download full MP4" : "↓ Download all ZIP";
+    $("resultsCount").textContent = (job.clips || []).length + (fullVideo ? " video" : " clips");
+    $("stageQueueCount").textContent = (job.clips || []).length + (fullVideo ? " video" : " clips");
     $("resultsSource").textContent = job.filename;
-    $("resultsTotal").textContent = (job.clips || []).length + " finished edits";
+    $("resultsTotal").textContent = fullVideo ? "Entire video preserved" : (job.clips || []).length + " finished edits";
     $("warnings").innerHTML = (job.warnings || []).map(w => '<div class="warning">' + esc(w) + '</div>').join("");
     renderPublishingReview(job);
     $("clipsGrid").innerHTML = (job.clips || []).map((clip,i) => buildClipCard(job,clip,i)).join("");
@@ -615,7 +634,7 @@
     const clip = job.clips[index];
     lastDisplayedClipFile = clip.file;
     const total = job.clips.length;
-    $("stageNumber").textContent = "CLIP " + pad(index + 1);
+    $("stageNumber").textContent = (job.mode === "brand_only" ? "VIDEO " : "CLIP ") + pad(index + 1);
     $("stageDuration").textContent = clock(clip.length);
     $("stagePosition").textContent = pad(index + 1) + " / " + pad(total);
     $("stageClipTitle").textContent = clip.title;
@@ -798,6 +817,106 @@
     }
   }
 
+
+  function pickBrandBatchFiles(files) {
+    if (brandBatchBusy) return;
+    const all = Array.from(files || []);
+    brandBatchFiles = all.filter(file =>
+      /\.(mp4|mov|webm|mkv|m4v)$/i.test(file.name) && file.size > 0 &&
+      (!config || file.size <= config.max_upload_mb * 1048576));
+    const count = brandBatchFiles.length;
+    $("brandBatchFilesTitle").textContent = count ?
+      count + (count === 1 ? " full video selected" : " full videos selected") :
+      "Choose videos to brand";
+    $("brandBatchFilesDetail").textContent = count ?
+      brandBatchFiles.slice(0,3).map(file => file.name).join(" · ") +
+        (count > 3 ? " · and " + (count - 3) + " more" : "") :
+      "One video or a whole batch · MP4, MOV, MKV, WEBM, M4V";
+    $("brandBatchStatus").textContent = count ?
+      "Ready to brand, full-length. No cuts or automatic captions." :
+      "Choose valid video files under the per-video size limit.";
+    if (all.length > count) toast((all.length-count) + " unsupported or oversized file(s) skipped.");
+    updateBrandBatchButton();
+  }
+  function updateBrandBatchButton() {
+    const b = $("brandBatchSubmit");
+    b.disabled = brandBatchBusy || !brandBatchFiles.length || !$("brandRightsAcknowledged").checked;
+    b.textContent = brandBatchBusy ? "Uploading batch…" :
+      "Brand " + (brandBatchFiles.length || "full") +
+      (brandBatchFiles.length === 1 ? " video ↗" : " full videos ↗");
+  }
+  async function submitBrandBatch() {
+    if (brandBatchBusy || !brandBatchFiles.length) return;
+    if (!$("brandRightsAcknowledged").checked) return toast("Acknowledge the publishing-rights notice.");
+    const top = Number($("brandCropTop").value), bottom = Number($("brandCropBottom").value);
+    if (![top,bottom].every(n => Number.isInteger(n) && n >= 0 && n <= 25) || top + bottom > 40)
+      return toast("Crop 0–25% per edge, maximum 40% combined.");
+    brandBatchBusy = true; updateBrandBatchButton();
+    const queue = brandBatchFiles.slice(), total = queue.length, failures = [];
+    let sent = 0, processed = 0;
+    async function worker() {
+      while (queue.length) {
+        const file = queue.shift(), form = new FormData();
+        form.append("video", file, file.name);
+        form.append("brand_id", $("brandOnlyProfile").value);
+        form.append("logo_position", $("brandOnlyPosition").value);
+        form.append("crop_top", String(top));
+        form.append("crop_bottom", String(bottom));
+        form.append("rights", $("brandOnlyRights").value);
+        form.append("audio_rights", $("brandOnlyAudio").value);
+        form.append("originality", $("brandOnlyOriginality").value);
+        form.append("rights_acknowledged", "true");
+        try {
+          await api("/api/brand-only", {method:"POST", body:form}); sent++;
+        } catch (error) { failures.push(file.name + ": " + error.message); }
+        processed++;
+        $("brandBatchStatus").textContent =
+          "Uploaded " + processed + " / " + total + " · " + sent +
+          " accepted · " + failures.length + " failed. Rendering continues in My exports.";
+      }
+    }
+    await Promise.all(Array.from({length:Math.min(2,total)}, () => worker()));
+    brandBatchBusy = false; updateBrandBatchButton();
+    $("brandBatchStatus").textContent = failures.length ?
+      sent + " accepted; " + failures.length + " failed: " + failures.slice(0,2).join(" · ") :
+      sent + " complete videos queued. Monitor and download each MP4 under My exports.";
+    if (sent) {
+      await refreshJobs().catch(() => {});
+      showPage("library", false);
+      $("pageLibrary").scrollIntoView({behavior:"smooth",block:"start"});
+      toast(sent + " full videos accepted for branding. No clip cutting.");
+    }
+  }
+  function setupBrandOnly() {
+    $("brandBatchBrowse").addEventListener("click", e => {
+      e.stopPropagation(); $("brandBatchFiles").click();
+    });
+    $("brandBatchDrop").addEventListener("click", e => {
+      if (!e.target.closest("button")) $("brandBatchFiles").click();
+    });
+    $("brandBatchDrop").addEventListener("keydown", e => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault(); $("brandBatchFiles").click();
+      }
+    });
+    $("brandBatchFiles").addEventListener("change", e => pickBrandBatchFiles(e.target.files));
+    $("brandRightsAcknowledged").addEventListener("change", updateBrandBatchButton);
+    for (const ev of ["dragenter","dragover"]) {
+      $("brandBatchDrop").addEventListener(ev, e => {
+        e.preventDefault(); $("brandBatchDrop").classList.add("dragging");
+      });
+    }
+    $("brandBatchDrop").addEventListener("dragleave", e => {
+      e.preventDefault(); $("brandBatchDrop").classList.remove("dragging");
+    });
+    $("brandBatchDrop").addEventListener("drop", e => {
+      e.preventDefault(); $("brandBatchDrop").classList.remove("dragging");
+      pickBrandBatchFiles(e.dataTransfer.files);
+    });
+    $("brandBatchSubmit").addEventListener("click", submitBrandBatch);
+    updateBrandBatchButton();
+  }
+
   function setupActions() {
     document.addEventListener("click", async (event) => {
       const selectedButton = event.target.closest("[data-select]");
@@ -828,8 +947,10 @@
       else if (play && selectedJobId) preview(selectedJobId, play.dataset.preview);
     });
     $("downloadAll").addEventListener("click", () => {
-      const job = jobs.find((j) => j.id === selectedJobId);
-      if (job && job.zip_file) download(job.id, job.zip_file);
+      const job = jobs.find(j => j.id === selectedJobId);
+      if (job?.mode === "brand_only" && job.clips?.[0]?.file)
+        download(job.id, job.clips[0].file);
+      else if (job?.zip_file) download(job.id, job.zip_file);
     });
     $("stagePlay").addEventListener("click", playSelectedClip);
     $("reframeBtn").addEventListener("click", createFocusedVersion);
@@ -908,6 +1029,7 @@
 
   async function init() {
     setupUploads();
+    setupBrandOnly();
     setupActions();
     try {
       const response = await fetch("/api/config", { cache: "no-store" });
