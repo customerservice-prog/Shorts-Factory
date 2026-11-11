@@ -17,6 +17,10 @@
   let cleanupSuggestions = [];
   let cleanupVideoUrl = null;
   let cleanupDrag = null;
+  let cleanupBeforeImageUrl = null;
+  let cleanupAfterImageUrl = null;
+  let cleanupRenderRevision = 0;
+  let cleanupPreviewBusy = false;
   let currentPreview = null;
   let toastTimer = null;
 
@@ -933,6 +937,7 @@
         remove.addEventListener("click",event=>{
           event.stopPropagation();
           cleanupRegions.splice(index,1);
+          invalidateCleanupPreview("Cleanup selection changed. Render a new processed frame.");
           renderCleanupBoxes();
           cleanupInfo();
         });
@@ -943,7 +948,86 @@
     cleanupRegions.forEach((box,index)=>add(box,index));
     cleanupSuggestions.forEach((box,index)=>add(box,index,true));
   }
+
+  function invalidateCleanupPreview(message) {
+    cleanupRenderRevision++;
+    $("cleanupProcessedResult").classList.add("hidden");
+    for (const url of [cleanupBeforeImageUrl, cleanupAfterImageUrl]) {
+      if (url) URL.revokeObjectURL(url);
+    }
+    cleanupBeforeImageUrl = null;
+    cleanupAfterImageUrl = null;
+    $("cleanupBeforeFrame").removeAttribute("src");
+    $("cleanupAfterFrame").removeAttribute("src");
+    if (message) $("cleanupPreviewNotice").textContent = message;
+    $("cleanupPreviewBtn").disabled = cleanupPreviewBusy || !brandBatchFiles.length;
+  }
+
+  async function renderActualCleanupFrame() {
+    const video = $("cleanupVideo");
+    if (!brandBatchFiles.length || !video.videoWidth || video.readyState < 2)
+      return toast("Select a video and play or scrub until the picture loads.");
+    if (cleanupRegions.length && !$("cleanupAuthorized").checked)
+      return toast("Confirm your permission to modify the selected old graphics.");
+    if (cleanupPreviewBusy) return;
+    cleanupPreviewBusy = true;
+    invalidateCleanupPreview("Processing your selected frame with the same cleanup filter used for exports…");
+    const revision = cleanupRenderRevision;
+    const button = $("cleanupPreviewBtn");
+    button.disabled = true;
+    button.textContent = "Rendering cleanup…";
+    video.pause();
+    try {
+      const scale = Math.min(1, 1600 / Math.max(video.videoWidth, video.videoHeight));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(96, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(96, Math.round(video.videoHeight * scale));
+      const context = canvas.getContext("2d", {alpha:false});
+      if (!context) throw Error("Your browser cannot capture a comparison frame.");
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const image = await new Promise(resolve=>canvas.toBlob(resolve,"image/jpeg",.89));
+      if (!image) throw Error("Your browser could not capture the current video frame.");
+      const form = new FormData();
+      form.append("frame", image, "current-frame.jpg");
+      form.append("cleanup_regions", JSON.stringify(cleanupRegions));
+      form.append("cleanup_authorized", $("cleanupAuthorized").checked ? "true" : "false");
+      form.append("brand_id", $("brandOnlyProfile").value);
+      form.append("logo_position", $("brandOnlyPosition").value);
+      form.append("logo_size", $("brandLogoSize").value);
+      form.append("logo_opacity", $("brandLogoOpacity").value);
+      form.append("logo_already_embedded", $("brandLogoAlreadyEmbedded").checked ? "true" : "false");
+      form.append("crop_top", $("brandCropTop").value);
+      form.append("crop_bottom", $("brandCropBottom").value);
+      const response = await api("/api/cleanup/preview", {method:"POST",body:form});
+      const output = await response.blob();
+      if (revision !== cleanupRenderRevision) return;
+      const source = URL.createObjectURL(image);
+      const after = URL.createObjectURL(output);
+      cleanupBeforeImageUrl = source;
+      cleanupAfterImageUrl = after;
+      $("cleanupBeforeFrame").src = source;
+      $("cleanupAfterFrame").src = after;
+      $("cleanupProcessedResult").classList.remove("hidden");
+      const areas = Number(response.headers.get("X-Cleanup-Applied") || 0);
+      $("cleanupPreviewNotice").textContent = areas ?
+        "Processed comparison ready: " + areas + " selected area(s) interpolated and channel logo applied. Zoom in on the AFTER image for smearing or leftover graphics. Repeat at different timestamps." :
+        "Processed comparison ready, but NO OLD GRAPHICS WERE REMOVED because no cleanup boxes were selected. The new logo alone cannot remove Buho TV.";
+      $("cleanupProcessedResult").scrollIntoView({behavior:"smooth",block:"nearest"});
+    } catch (error) {
+      if (revision === cleanupRenderRevision)
+        $("cleanupPreviewNotice").textContent =
+          "Cleanup preview failed: " + error.message +
+          ". Do not treat the original preview as an edited export.";
+    } finally {
+      cleanupPreviewBusy = false;
+      button.disabled = !brandBatchFiles.length;
+      button.textContent = "▶ Preview actual cleaned frame";
+    }
+  }
+
   function previewCleanupSource() {
+    invalidateCleanupPreview("The video above is the original, not processed. Mark unwanted graphics and press Preview actual cleaned frame.");
+    $("cleanupPreviewBtn").disabled = !brandBatchFiles.length;
     if (cleanupVideoUrl) {
       URL.revokeObjectURL(cleanupVideoUrl);
       cleanupVideoUrl=null;
@@ -979,9 +1063,11 @@
         seek.value=String(video.currentTime/video.duration*100);
     });
     seek.addEventListener("input",()=>{
+      invalidateCleanupPreview("Video time changed. Preview the cleanup for this new frame.");
       if(Number.isFinite(video.duration)&&video.duration>0)
         video.currentTime=video.duration*Number(seek.value)/100;
     });
+    $("cleanupPreviewBtn").addEventListener("click",renderActualCleanupFrame);
     $("cleanupPlay").addEventListener("click",()=>{
       if(video.paused) video.play().catch(()=>{});
       else video.pause();
@@ -1025,6 +1111,7 @@
       if(allowedCleanupBox(box) &&
          cleanupRegions.reduce((n,x)=>n+x.w*x.h,0)+box.w*box.h<=3000) {
         cleanupRegions.push(box);
+        invalidateCleanupPreview("Cleanup region changed. Press Preview actual cleaned frame to see the new result.");
         cleanupInfo("Area marked for cleanup. Review its placement throughout the video before generating.");
       } else {
         cleanupInfo("Draw a rectangle at least 2% wide and tall, max 65% width/40% height. Large masks can damage the scene.");
@@ -1036,6 +1123,7 @@
       cleanupDrag=null;renderCleanupBoxes();
     });
     $("cleanupClear").addEventListener("click",()=>{
+      invalidateCleanupPreview("No boxes selected. No source graphics will be removed.");
       cleanupRegions=[];cleanupSuggestions=[];
       $("cleanupApplySuggestions").classList.add("hidden");
       renderCleanupBoxes();cleanupInfo("All removal areas cleared. Your source footage is unchanged.");
@@ -1074,6 +1162,7 @@
           cleanupRegions.push(box);
       }
       cleanupSuggestions=[];
+      invalidateCleanupPreview("Suggested areas changed. Press Preview actual cleaned frame.");
       $("cleanupApplySuggestions").classList.add("hidden");
       renderCleanupBoxes();
       cleanupInfo("Suggested areas added. Check the full video before publishing; cleanup is not perfect.");
@@ -1201,12 +1290,22 @@
     setupCleanupEditor();
     $("autoCleanup").addEventListener("change",updateBrandBatchButton);
     $("cleanupAuthorized").addEventListener("change",updateBrandBatchButton);
-    $("brandOnlyProfile").addEventListener("change", () => updateFullVideoPreview(true));
+    $("brandOnlyProfile").addEventListener("change", () => {
+      invalidateCleanupPreview("Channel logo changed. Render a new processed frame.");
+      updateFullVideoPreview(true);
+    });
     for (const id of ["brandOnlyPosition", "brandLogoSize", "brandLogoOpacity",
                       "brandLogoAlreadyEmbedded", "brandSubtitleMode",
                       "brandSubtitleStyle", "brandFollowBanner"]) {
-      $(id).addEventListener("input", () => updateFullVideoPreview(false));
+      $(id).addEventListener("input", () => {
+        if (["brandOnlyPosition","brandLogoSize","brandLogoOpacity","brandLogoAlreadyEmbedded"].includes(id))
+          invalidateCleanupPreview("Logo settings changed. Reprocess the preview frame.");
+        updateFullVideoPreview(false);
+      });
       $(id).addEventListener("change", () => updateFullVideoPreview(false));
+    }
+    for (const id of ["brandCropTop", "brandCropBottom"]) {
+      $(id).addEventListener("input",()=>invalidateCleanupPreview("Crop settings changed. Preview the revised frame."));
     }
     $("brandBatchBrowse").addEventListener("click", e => {
       e.stopPropagation(); $("brandBatchFiles").click();
