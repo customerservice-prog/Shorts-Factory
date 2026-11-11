@@ -5,6 +5,7 @@ import zipfile
 from copy import deepcopy
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -21,6 +22,7 @@ from branding import BRAND_DIR, PROFILE_ID, brand_path, list_brands, save_brand
 from review import PLATFORMS, AUDIO_RIGHTS, ORIGINALITY, inspect_export, risk_review
 from brand_only import brand_full_video, POSITIONS, probe_media
 from show_style import create_subtitle_file, create_follow_banner
+from overlay_cleanup import normalize_masks, suggest_text_masks
 from pipeline import transcribe
 
 BASE = Path(os.getenv("DATA_DIR", "./data")).resolve()
@@ -198,7 +200,8 @@ def process_brand_only(job_id: str):
             crop_top=job["crop_top"], crop_bottom=job["crop_bottom"],
             logo_size=job.get("logo_size", 30),
             logo_opacity=job.get("logo_opacity", 100),
-            subtitle_file=captions_path, follow_banner=follow_banner
+            subtitle_file=captions_path, follow_banner=follow_banner,
+            cleanup_regions=job.get("cleanup_regions", [])
         )
         update_job(job_id, progress=93, note="Verifying full video duration and audio...")
         clip = {
@@ -223,6 +226,12 @@ def process_brand_only(job_id: str):
             review["source_findings"].append({
                 "level": "high", "title": "Artist/performance release not confirmed",
                 "detail": "Get permission for commercial publishing and editing from the relevant performer/rightsholder; also verify recording and composition rights separately."
+            })
+        if technical.get("cleanup_region_count", 0):
+            review["source_findings"].append({
+                "level": "review",
+                "title": "Old overlays interpolated; check the full video",
+                "detail": "Interpolated pixels can smear moving scenes or leave text remnants. Watch for distorted faces and rights/attribution obligations before publishing."
             })
         if technical["captions_added"]:
             review["source_findings"].append({
@@ -255,6 +264,8 @@ async def submit_brand_only(
     follow_banner: bool = Form(False),
     performance_permission: str = Form("unknown"),
     release_reference: str = Form(""),
+    cleanup_regions: str = Form("[]"),
+    cleanup_authorized: bool = Form(False),
     crop_top: int = Form(0),
     crop_bottom: int = Form(0),
     rights: str = Form("unknown"),
@@ -274,6 +285,12 @@ async def submit_brand_only(
         raise HTTPException(400, "Invalid performance-rights selection.")
     if len(release_reference) > 300:
         raise HTTPException(400, "Release reference is too long.")
+    try:
+        masks = normalize_masks(cleanup_regions)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if masks and not cleanup_authorized:
+        raise HTTPException(400, "Confirm you may edit the selected old graphics.")
     if not (15 <= logo_size <= 40 and 60 <= logo_opacity <= 100):
         raise HTTPException(400, "Watermark size or opacity is outside safe limits.")
     if not (0 <= crop_top <= 25 and 0 <= crop_bottom <= 25 and
@@ -326,6 +343,8 @@ async def submit_brand_only(
             "follow_banner": follow_banner,
             "performance_permission": performance_permission,
             "release_reference": release_reference.strip(),
+            "cleanup_regions": masks,
+            "cleanup_authorized": bool(cleanup_authorized),
             "crop_top": crop_top, "crop_bottom": crop_bottom,
             "source": str(source), "logo": str(logo_snapshot) if logo_snapshot else None,
             "review": None, "clips": [], "warnings": [],
@@ -338,6 +357,26 @@ async def submit_brand_only(
     except Exception:
         shutil.rmtree(folder, ignore_errors=True)
         raise
+
+
+@app.post("/api/cleanup/suggest")
+async def suggest_old_graphic_areas(
+    video: UploadFile = File(...),
+    x_access_key: str | None = Header(default=None),
+):
+    """Suggest likely text regions only; never remove without review."""
+    protect(x_access_key)
+    suffix = Path(video.filename or "").suffix.lower()
+    if suffix not in ALLOWED_VIDEOS:
+        raise HTTPException(400, "Choose MP4, MOV, MKV, WEBM or M4V.")
+    with tempfile.TemporaryDirectory(dir=str(BASE)) as td:
+        source = Path(td) / ("sample" + suffix)
+        await save_upload(video, source, MAX_UPLOAD)
+        try:
+            info = probe_media(source)
+            return suggest_text_masks(source, info["duration"])
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            raise HTTPException(422, "Analysis unavailable; mark unwanted graphics manually.") from exc
 
 
 @app.get("/healthz")

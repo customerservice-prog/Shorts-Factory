@@ -3,6 +3,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from overlay_cleanup import delogo_filters
 
 POSITIONS = ("top_right", "top_left", "bottom_right", "bottom_left")
 
@@ -30,7 +31,7 @@ def probe_media(path):
 
 def brand_full_video(source, destination, logo, *, position="top_right",
                      crop_top=0, crop_bottom=0, logo_size=30, logo_opacity=100,
-                     subtitle_file=None, follow_banner=None):
+                     subtitle_file=None, follow_banner=None, cleanup_regions=None):
     """Preserve the source's complete timeline, audio and native frame geometry.
 
     Optional edge crops remove portions of the picture, not the duration.
@@ -69,7 +70,11 @@ def brand_full_video(source, destination, logo, *, position="top_right",
         # Crop after decoding; keep the video and audio timelines untouched.
         crop_filter = (f"crop=iw:trunc(ih*{(100-crop_top-crop_bottom)/200:.6f})*2:"
                        f"0:trunc(ih*{crop_top/200:.6f})*2,")
-    filters = [f"[0:v]{crop_filter}scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[base]"]
+    removal = delogo_filters(cleanup_regions or [], before["width"], before["height"])
+    prefix = ",".join(removal + ([crop_filter.rstrip(",")] if crop_filter else []))
+    if prefix:
+        prefix += ","
+    filters = [f"[0:v]{prefix}scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[base]"]
     current = "base"
     inputs = ["-i", str(source)]
     next_input = 1
@@ -122,6 +127,8 @@ def brand_full_video(source, destination, logo, *, position="top_right",
             "original_width": before["width"], "original_height": before["height"],
             "full_length": True, "captions_added": subtitle_file is not None,
             "follow_banner": follow_banner is not None,
+            "cleanup_region_count": len(cleanup_regions or []),
+            "cleanup_verified_visual": False,
             "logo_added": logo is not None, "logo_size": logo_size if logo else 0,
             "logo_opacity": logo_opacity if logo else 0,
             "size_bytes": destination.stat().st_size
