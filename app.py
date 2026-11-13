@@ -442,17 +442,12 @@ def clean_rebrand_saved_source(
     folder.mkdir(parents=True, mode=0o700)
     try:
         dst = folder / ("source" + src.suffix.lower())
-        # Avoid duplicating the video on the same persistent volume.
+        # Reuse the original inode when the filesystem supports hard links.
+        # This does not duplicate video bytes or alter either project.
         try:
             os.link(src, dst)
         except OSError:
-            # The project and source live on the same persistent volume.
-            # A hard link preserves both project paths without doubling disk use.
-            try:
-                os.link(src, dst)
-            except OSError:
-                # Different filesystems or disallowed links: preserve old behavior.
-                shutil.copyfile(src, dst)
+            shutil.copyfile(src, dst)
         logo = folder / "brand.png"
         shutil.copyfile(brand_path("bajo-mundo"), logo)
         now = int(time.time())
