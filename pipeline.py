@@ -8,7 +8,6 @@ import os
 import re
 import subprocess
 import threading
-import zipfile
 from pathlib import Path
 from review import inspect_export, risk_review
 
@@ -404,19 +403,10 @@ def make_shorts(job: dict, directory: Path, progress):
     for clip, report in zip(clips, review["clip_reviews"]):
         clip["review"] = report
     warnings.append("Monetization is NOT certified: review rights, music, originality and platform eligibility before publishing.")
-    progress(97, "rendering", "Packaging verified technical exports...")
+    progress(97, "rendering", "Finalizing verified technical exports...")
+    # MP4 clips remain on persistent storage. Their ZIP is generated only
+    # when requested, avoiding a second full batch on /data during rendering.
     zip_name = "shorts_factory_export.zip"
-    with zipfile.ZipFile(out_dir / zip_name, "w", zipfile.ZIP_DEFLATED,
-                         compresslevel=1) as bundle:
-        for clip in clips:
-            bundle.write(out_dir / clip["file"], arcname=clip["file"])
-        bundle.writestr("clips.json", json.dumps({
-            "source": job["filename"], "rights_selected": job["rights"],
-            "channel": job.get("channel_name"), "brand_id": job.get("brand_id"),
-            "previous_brand_cover": job.get("cover_old_brand", "none"),
-            "clips": clips, "warnings": warnings, "review": review,
-            "note": "Export does not establish copyright clearance or monetization eligibility.",
-        }, indent=2))
     transcript = " ".join(w["text"] for w in words)
     return {"clips": clips, "warnings": warnings, "review": review, "zip_file": zip_name,
             "transcript": transcript[:20000]}
