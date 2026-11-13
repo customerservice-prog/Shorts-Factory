@@ -9,40 +9,46 @@ from copy import deepcopy
 import re
 import shutil
 import subprocess
+import secrets
 import tempfile
 import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.background import BackgroundTask
+from starlette.requests import ClientDisconnect
 
 from pipeline import make_shorts, generate_thumbnail, probe_video, render_clip
 from branding import BRAND_DIR, PROFILE_ID, brand_path, list_brands, save_brand
 from review import PLATFORMS, AUDIO_RIGHTS, ORIGINALITY, inspect_export, risk_review
-from brand_only import brand_full_video, POSITIONS, probe_media
+from brand_only import LONG_VIDEO_SECONDS, POSITIONS, brand_full_video, probe_media
 from show_style import create_subtitle_file, create_follow_banner
 from overlay_cleanup import normalize_masks, suggest_text_masks
 from cleanup_preview import preview_frame
 from pipeline import transcribe
+import video_uploads
 
 BASE = Path(os.getenv("DATA_DIR", "./data")).resolve()
 BASE.mkdir(parents=True, exist_ok=True)
-UPLOAD_WORKSPACE = tempfile.TemporaryDirectory(prefix="shorts-factory-inputs-")
-UPLOAD_DIR = Path(UPLOAD_WORKSPACE.name)
+UPLOAD_DIR = video_uploads.DIRECTORY
 STATIC = Path(__file__).resolve().parent / "static"
-MAX_UPLOAD = int(os.getenv("MAX_UPLOAD_MB", "750")) * 1024 * 1024
+MIB = 1024 * 1024
+MAX_UPLOAD = int(os.getenv("MAX_UPLOAD_MB", "750")) * MIB
+MAX_FULL_UPLOAD = max(MAX_UPLOAD, int(os.getenv("MAX_FULL_UPLOAD_MB", "8192")) * MIB)
+MEDIA_COOKIE = "shorts_media_access"
+MEDIA_TOKEN = secrets.token_urlsafe(32)
 PASSWORD = os.getenv("APP_PASSWORD", "")
 HOSTED = bool(os.getenv("RAILWAY_PROJECT_ID") or os.getenv("RENDER") or os.getenv("HOSTED_MODE"))
 EXECUTOR = ThreadPoolExecutor(max_workers=max(1, min(2, int(os.getenv("WORKERS", "1")))))
 LOCK = threading.RLock()
 THUMB_LOCK = threading.Lock()
-ALLOWED_VIDEOS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
+ALLOWED_VIDEOS = video_uploads.VIDEO_EXTENSIONS
 ALLOWED_LOGOS = {".png", ".webp", ".jpg", ".jpeg"}
 ACTIVE_JOB_STATUSES = ("queued", "analyzing", "rendering")
 LOGGER = logging.getLogger("uvicorn.error")
@@ -51,7 +57,13 @@ LOGGER = logging.getLogger("uvicorn.error")
 @asynccontextmanager
 async def lifespan(_app):
     await asyncio.to_thread(cleanup_stored_sources)
-    yield
+    sweeper = asyncio.create_task(video_uploads.expire_idle_uploads())
+    try:
+        yield
+    finally:
+        sweeper.cancel()
+        with suppress(asyncio.CancelledError):
+            await sweeper
 
 
 app = FastAPI(title="Shorts Factory", docs_url=None, redoc_url=None, openapi_url=None,
@@ -63,6 +75,39 @@ def protect(x_access_key: str | None):
         raise HTTPException(503, "Administrator must set APP_PASSWORD before processing uploads.")
     if PASSWORD and not hmac.compare_digest(x_access_key or "", PASSWORD):
         raise HTTPException(401, "Incorrect access password.")
+
+
+@app.post("/api/media-session")
+def open_media_session(request: Request, x_access_key: str | None = Header(default=None)):
+    protect(x_access_key)
+    response = Response(status_code=204, headers={"Cache-Control": "no-store"})
+    response.set_cookie(MEDIA_COOKIE, MEDIA_TOKEN, httponly=True, secure=request.url.scheme == "https",
+                        samesite="strict", path="/api/jobs/")
+    return response
+
+
+@app.post("/api/video-uploads", status_code=201)
+async def begin_video_upload(filename: str = Form(..., max_length=512), size: int = Form(...),
+                             x_access_key: str | None = Header(default=None)):
+    protect(x_access_key)
+    return {"upload_id": video_uploads.begin(filename, size, MAX_FULL_UPLOAD)}
+
+
+@app.put("/api/video-uploads/{upload_id}")
+async def write_video_upload(upload_id: str, offset: int, request: Request,
+                             x_access_key: str | None = Header(default=None)):
+    protect(x_access_key)
+    try:
+        return {"offset": await video_uploads.write(upload_id, offset, request)}
+    except ClientDisconnect:
+        return Response(status_code=499)
+
+
+@app.delete("/api/video-uploads/{upload_id}", status_code=204)
+async def cancel_video_upload(upload_id: str, x_access_key: str | None = Header(default=None)):
+    protect(x_access_key)
+    await video_uploads.discard(upload_id)
+    return Response(status_code=204)
 
 
 def job_dir(job_id: str) -> Path:
@@ -269,7 +314,7 @@ def process_brand_only(job_id: str):
                 update_job(job_id, status="analyzing", progress=13,
                            note="Detecting speech for synchronized captions (not changing footage)...")
                 try:
-                    words, language = transcribe(Path(job["source"]))
+                    words, language = transcribe(source)
                     if words:
                         candidate = folder / "show_captions.ass"
                         count = create_subtitle_file(
@@ -297,6 +342,19 @@ def process_brand_only(job_id: str):
             follow_banner = create_follow_banner(folder / "follow_banner.png")
         update_job(job_id, status="rendering", progress=46,
                    note="Applying original channel logo and optional show-style graphics...")
+        encode_progress = 46
+
+        def report_render(fraction):
+            nonlocal encode_progress
+            percent = 46 + int(fraction * 46)
+            if percent > encode_progress:
+                encode_progress = percent
+                update_job(job_id, progress=percent, note="Rendering the full-length MP4…")
+
+        # Budget against the export volume. The source is on temporary disk.
+        output_budget = shutil.disk_usage(BASE).free - 128 * MIB
+        if output_budget < 52 * MIB:
+            raise ValueError("Download and remove finished exports to free space for a new MP4.")
         technical = brand_full_video(
             job["source"], target, job["logo"],
             position=job["logo_position"],
@@ -304,7 +362,9 @@ def process_brand_only(job_id: str):
             logo_size=job.get("logo_size", 30),
             logo_opacity=job.get("logo_opacity", 100),
             subtitle_file=captions_path, follow_banner=follow_banner,
-            cleanup_regions=approved_masks
+            cleanup_regions=approved_masks,
+            max_output_bytes=output_budget if before["duration"] >= LONG_VIDEO_SECONDS else None,
+            progress=report_render
         )
         technical["source_cleanliness"] = (
             "needs_visual_review" if approved_masks or
@@ -372,7 +432,8 @@ def process_brand_only(job_id: str):
 
 @app.post("/api/brand-only", status_code=202)
 async def submit_brand_only(
-    video: UploadFile = File(...),
+    video: UploadFile | None = File(None),
+    upload_id: str | None = Form(None),
     brand_id: str = Form("bajo-mundo"),
     logo_position: str = Form("top_right"),
     logo_size: int = Form(30),
@@ -430,18 +491,14 @@ async def submit_brand_only(
         raise HTTPException(400, "Selected logo profile is unavailable.") from exc
     if logo_path is None:
         raise HTTPException(400, "Select a channel profile that has a logo.")
-    # Check persistent space for the export. Uploaded originals live in /tmp.
-    if shutil.disk_usage(BASE).free < 250 * 1024 * 1024:
-        raise HTTPException(507, "Server storage is low. Download and delete exports you no longer need.")
     job_id = uuid.uuid4().hex[:20]
     folder = job_dir(job_id)
     folder.mkdir(mode=0o700, parents=True)
     source = None
     try:
-        source = await save_video_upload(video)
-        needed_space = max(180 * 1024 * 1024, source.stat().st_size * 2)
-        if shutil.disk_usage(BASE).free < needed_space:
-            raise HTTPException(507, "Not enough space to render this video. Download and delete exports you no longer need.")
+        filename, source = await full_video_source(video, upload_id)
+        if shutil.disk_usage(BASE).free < 180 * MIB:
+            raise HTTPException(507, "Download and remove finished exports to free space for a new MP4.")
         logo_snapshot = folder / "brand.png" if not logo_already_embedded else None
         if logo_snapshot:
             shutil.copyfile(logo_path, logo_snapshot)
@@ -449,7 +506,7 @@ async def submit_brand_only(
         channel = next((x["name"] for x in list_brands() if x["id"] == brand_id),
                        "Selected channel")
         record = {
-            "id": job_id, "filename": (video.filename or "Video")[:140],
+            "id": job_id, "filename": filename[:140],
             "created_at": now, "updated_at": now, "status": "queued",
             "progress": 1, "note": "Queued for fast full-length branding",
             "mode": "brand_only", "clip_count": 1, "clip_length": 0,
@@ -489,6 +546,7 @@ async def submit_brand_only(
 async def clean_rebrand_saved_source(
     job_id: str,
     video: UploadFile | None = File(None),
+    upload_id: str | None = Form(None),
     source_rights_confirmed: bool = Form(False),
     auto_cleanup: bool = Form(True),
     x_access_key: str | None = Header(default=None),
@@ -506,10 +564,10 @@ async def clean_rebrand_saved_source(
         raise HTTPException(409, "The source project is not completed.")
     fresh_id = uuid.uuid4().hex[:20]
     folder = job_dir(fresh_id)
-    source = await source_for_edit(original, video)
+    source = await source_for_edit(original, video, upload_id)
     try:
-        if shutil.disk_usage(BASE).free < max(180 * 1024 * 1024, source.stat().st_size):
-            raise HTTPException(507, "Insufficient space to render the new copy.")
+        if shutil.disk_usage(BASE).free < 180 * MIB:
+            raise HTTPException(507, "Download and remove finished exports to free space for the new MP4.")
         folder.mkdir(parents=True, mode=0o700)
         logo = folder / "brand.png"
         shutil.copyfile(brand_path("bajo-mundo"), logo)
@@ -593,15 +651,13 @@ async def processed_cleanup_frame(
 
 @app.post("/api/cleanup/suggest")
 async def suggest_old_graphic_areas(
-    video: UploadFile = File(...),
+    video: UploadFile | None = File(None),
+    upload_id: str | None = Form(None),
     x_access_key: str | None = Header(default=None),
 ):
     """Suggest likely text regions only; never remove without review."""
     protect(x_access_key)
-    suffix = Path(video.filename or "").suffix.lower()
-    if suffix not in ALLOWED_VIDEOS:
-        raise HTTPException(400, "Choose MP4, MOV, MKV, WEBM or M4V.")
-    source = await save_video_upload(video)
+    _, source = await full_video_source(video, upload_id)
     try:
         info = await asyncio.to_thread(probe_media, source)
         return await asyncio.to_thread(suggest_text_masks, source, info["duration"])
@@ -621,7 +677,9 @@ def health():
 def config():
     return {"protected": bool(PASSWORD) or HOSTED,
             "needs_setup": HOSTED and not bool(PASSWORD),
-            "max_upload_mb": MAX_UPLOAD // 1024 // 1024,
+            "max_upload_mb": MAX_UPLOAD // MIB,
+            "max_full_upload_mb": MAX_FULL_UPLOAD // MIB,
+            "video_upload_chunk_bytes": video_uploads.CHUNK_SIZE,
             "engine": "Local Whisper + FFmpeg"}
 
 
@@ -702,17 +760,15 @@ async def save_upload(upload: UploadFile, path: Path, limit: int):
         raise HTTPException(400, "The uploaded file was empty.")
 
 
-async def save_video_upload(video: UploadFile) -> Path:
-    suffix = Path(video.filename or "").suffix.lower()
-    if suffix not in ALLOWED_VIDEOS:
-        raise HTTPException(400, "Please upload MP4, MOV, MKV, WEBM or M4V.")
-    if video.size is not None and video.size > MAX_UPLOAD:
-        raise HTTPException(413, "File is larger than the allowed upload size.")
+async def save_video_upload(video: UploadFile, limit: int = MAX_UPLOAD) -> Path:
+    suffix = video_uploads.video_suffix(video.filename or "")
+    if video.size is not None and video.size > limit:
+        raise HTTPException(413, f"Choose a video up to {limit // MIB:,} MB.")
     if video.size is not None and shutil.disk_usage(UPLOAD_DIR).free < video.size:
         raise HTTPException(507, "Temporary upload space is full. Try again after processing finishes.")
     source = UPLOAD_DIR / (uuid.uuid4().hex + suffix)
     try:
-        await save_upload(video, source, MAX_UPLOAD)
+        await save_upload(video, source, limit)
     except OSError as exc:
         if exc.errno in (errno.ENOSPC, errno.EDQUOT):
             raise HTTPException(507, "Temporary upload space is full. Try again after processing finishes.") from exc
@@ -720,9 +776,20 @@ async def save_video_upload(video: UploadFile) -> Path:
     return source
 
 
-async def source_for_edit(job: dict, video: UploadFile | None) -> Path:
+async def full_video_source(video: UploadFile | None, upload_id: str | None) -> tuple[str, Path]:
+    if (video is None) == (upload_id is None):
+        raise HTTPException(400, "Choose one video to upload.")
     if video is not None:
-        return await save_video_upload(video)
+        return video.filename or "Video", await save_video_upload(video, MAX_FULL_UPLOAD)
+    return await video_uploads.take(upload_id)
+
+
+async def source_for_edit(job: dict, video: UploadFile | None, upload_id: str | None = None) -> Path:
+    if upload_id is not None:
+        _, source = await full_video_source(video, upload_id)
+        return source
+    if video is not None:
+        return await save_video_upload(video, MAX_FULL_UPLOAD)
     original = Path(job.get("source") or "")
     if original.suffix not in ALLOWED_VIDEOS or not original.is_file() or original.is_symlink():
         raise HTTPException(409, "Select the original video from your device and try again.")
@@ -910,6 +977,7 @@ def _reframe_worker(job_id: str, source: Path, source_filename: str, focus: str,
 async def reframe_saved_clip(
     job_id: str,
     video: UploadFile | None = File(None),
+    upload_id: str | None = Form(None),
     clip_file: str = Form(...),
     focus: str = Form(...),
     rights_confirmed: bool = Form(False),
@@ -925,7 +993,7 @@ async def reframe_saved_clip(
     job = read_job(job_id)
     if job.get("status") != "completed":
         raise HTTPException(409, "Clip is not ready")
-    source = await source_for_edit(job, video)
+    source = await source_for_edit(job, video, upload_id)
     try:
         with LOCK:
             job = read_job(job_id)
@@ -994,8 +1062,12 @@ def archive_on_demand(job: dict, output_dir: Path, filename: str):
 
 
 @app.get("/api/jobs/{job_id}/files/{filename}")
-def get_output(job_id: str, filename: str, x_access_key: str | None = Header(default=None)):
-    protect(x_access_key)
+@app.head("/api/jobs/{job_id}/files/{filename}")
+def get_output(job_id: str, filename: str, request: Request, inline: bool = False,
+               x_access_key: str | None = Header(default=None)):
+    media_access = request.cookies.get(MEDIA_COOKIE, "")
+    if not hmac.compare_digest(media_access.encode(), MEDIA_TOKEN.encode()):
+        protect(x_access_key)
     job = read_job(job_id)
     if job.get("status") != "completed":
         raise HTTPException(409, "Export is not ready")
@@ -1012,7 +1084,8 @@ def get_output(job_id: str, filename: str, x_access_key: str | None = Header(def
         base_name = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(job.get("filename", "video")).stem)
         channel_name = re.sub(r"[^A-Za-z0-9_-]+", "_", job.get("channel_name", "Bajo_Mundo_TV"))
         download_name = (base_name[:85].strip("_") or "video") + "_" + (channel_name[:35].strip("_") or "Branded") + ".mp4"
-    return FileResponse(file_path, filename=download_name,
+    return FileResponse(file_path, filename=download_name, headers={"Cache-Control": "private, no-store"},
+                        content_disposition_type="inline" if inline and filename.endswith(".mp4") else "attachment",
                         media_type="application/zip" if filename.endswith(".zip") else "video/mp4")
 
 

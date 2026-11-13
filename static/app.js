@@ -27,7 +27,6 @@
   let renderedResultsKey = "";
   let renderedHistoryKey = "";
   let selectedClipIndex = 0;
-  let previewVideoUrl = null;
   let previewRequestNumber = 0;
   let pendingCompletionId = null;
   let lastDisplayedClipFile = null;
@@ -80,14 +79,13 @@
   function clearVideoPreview() {
     previewRequestNumber++;
     const video = $("featuredVideo");
+    video.onerror = null;
     video.pause();
     video.removeAttribute("src");
     video.load();
     video.classList.add("hidden");
     $("featuredPoster").classList.remove("hidden");
     $("stageBackdrop").classList.remove("hidden");
-    if (previewVideoUrl) URL.revokeObjectURL(previewVideoUrl);
-    previewVideoUrl = null;
     $("stageLoading").classList.add("hidden");
     $("stagePlayWrap").classList.remove("hidden");
   }
@@ -116,9 +114,58 @@
         const body = await response.json();
         message = typeof body.detail === "string" ? body.detail : message;
       } catch (_) {}
-      throw new Error(message);
+      const error = new Error(message);
+      error.status = response.status;
+      throw error;
     }
     return response;
+  }
+
+  async function withVideoUpload(form, file, submit, onProgress = () => {}) {
+    const limit = config?.max_full_upload_mb ?? config?.max_upload_mb;
+    if (limit && file.size > limit * 1048576) {
+      throw new Error(file.name + " exceeds the " + fullVideoLimitLabel() + " limit.");
+    }
+    const chunkSize = config?.video_upload_chunk_bytes;
+    if (!chunkSize || file.size <= chunkSize) {
+      form.append("video", file, file.name);
+      return submit();
+    }
+    const metadata = new FormData();
+    metadata.append("filename", file.name);
+    metadata.append("size", String(file.size));
+    const {upload_id: id} = await (await api("/api/video-uploads", {method: "POST", body: metadata})).json();
+    const path = "/api/video-uploads/" + encodeURIComponent(id);
+    try {
+      let offset = 0;
+      while (offset < file.size) {
+        const end = Math.min(offset + chunkSize, file.size);
+        const body = file.slice(offset, end);
+        for (let attempt = 0; ; attempt++) {
+          try {
+            const response = await api(path + "?offset=" + offset, {method: "PUT", body});
+            const progress = await response.json();
+            if (progress.offset !== end) throw new Error("Upload progress was out of sync.");
+            offset = end;
+            onProgress(Math.floor(offset * 100 / file.size));
+            break;
+          } catch (error) {
+            if (attempt === 2 || error.status === 507 || (error.status && error.status < 500 && error.status !== 408)) throw error;
+            await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+          }
+        }
+      }
+      form.append("upload_id", id);
+      return await submit();
+    } catch (error) {
+      await api(path, {method: "DELETE"}).catch(() => {});
+      throw error;
+    }
+  }
+
+  function fullVideoLimitLabel() {
+    const limit = config?.max_full_upload_mb ?? config?.max_upload_mb;
+    return limit ? (limit >= 1024 && limit % 1024 === 0 ? limit / 1024 + " GB" : limit + " MB") : "";
   }
 
   const presets = {
@@ -532,9 +579,10 @@
     }
   }
 
-  function statusLabel(status) {
+  function statusLabel(status, fullVideo) {
     return ({
-      queued: "Queued", analyzing: "Finding highlights", rendering: "Editing shorts",
+      queued: "Queued", analyzing: fullVideo ? "Analyzing video" : "Finding highlights",
+      rendering: fullVideo ? "Rendering video" : "Editing shorts",
       completed: "Ready", failed: "Failed", interrupted: "Interrupted"
     })[status] || "Unknown";
   }
@@ -547,7 +595,8 @@
     }
     panel.classList.remove("hidden");
     $("progressHeadline").textContent = job.status === "failed" ? "Processing needs attention" :
-      job.status === "interrupted" ? "Processing was interrupted" : "Creating your shorts";
+      job.status === "interrupted" ? "Processing was interrupted" :
+      job.mode === "brand_only" ? "Branding your full video" : "Creating your shorts";
     $("progressNote").textContent = job.note || "Processing...";
     $("progressPercent").textContent = (job.progress || 0) + "%";
     $("progressFill").style.width = (job.progress || 0) + "%";
@@ -562,13 +611,15 @@
     const first = (job.clips || [])[0];
     const poster = first ? '<img class="history-poster" data-thumb-job="' + esc(job.id) +
       '" data-clip-thumb="' + esc(first.file) + '" alt="Video thumbnail" loading="lazy">' : '<span>▶</span>';
+    const fullVideo = job.mode === "brand_only";
     return '<article class="history-item"><span class="history-file-icon">' + poster + '</span>' +
       '<div class="history-details"><strong title="' + esc(job.filename) + '">' + esc(job.filename) + '</strong>' +
-      '<p>' + esc(date) + (job.mode === "brand_only" ?
-      ' · Full video · no cuts' :
+      '<p>' + esc(date) + (fullVideo ?
+      ' · Full video' + (job.clip_length ? ' · ' + clock(job.clip_length) : '') :
       ' · ' + esc((job.clips || []).length || job.clip_count) +
       ' clips · ' + esc(job.clip_length) + 's target') + '</p></div>' +
-      '<span class="status-tag ' + esc(job.status) + '">' + esc(statusLabel(job.status)) + '</span>' +
+      '<span class="status-tag ' + esc(job.status) + '">' + esc(statusLabel(job.status, fullVideo)) +
+      (fullVideo && job.status === "rendering" ? ' · ' + esc(job.progress || 0) + '%' : '') + '</span>' +
       '<button type="button" data-view="' + esc(job.id) + '">' + (job.status === "completed" ? "Open studio ↗" : "View status") + '</button>' +
       (canDelete ? '<button type="button" class="delete-btn" data-delete="' + esc(job.id) + '" aria-label="Delete project">×</button>' : "") +
       '</article>';
@@ -717,11 +768,15 @@
     $("stageLoading").classList.remove("hidden");
     $("stagePlayWrap").classList.add("hidden");
     try {
-      const blob = await fileBlob(job.id, clip.file);
+      await api("/api/media-session", {method: "POST"});
       if (requestId !== previewRequestNumber) return;
-      previewVideoUrl = URL.createObjectURL(blob);
       const player = $("featuredVideo");
-      player.src = previewVideoUrl;
+      player.onerror = () => {
+        if (requestId !== previewRequestNumber) return;
+        clearVideoPreview();
+        toast("Unable to play this export. Try downloading it.");
+      };
+      player.src = outputUrl(job.id, clip.file) + "?inline=true";
       $("featuredPoster").classList.add("hidden");
       $("stageBackdrop").classList.add("hidden");
       player.classList.remove("hidden");
@@ -773,27 +828,66 @@
     }
   }
 
-  async function fileBlob(jobId, filename) {
-    const response = await api("/api/jobs/" + encodeURIComponent(jobId) + "/files/" + encodeURIComponent(filename));
-    return response.blob();
+  function outputUrl(jobId, filename) {
+    return "/api/jobs/" + encodeURIComponent(jobId) + "/files/" + encodeURIComponent(filename);
+  }
+
+  async function saveLargeVideo(job, clip, url) {
+    const stem = text => String(text || "").replace(/[^A-Za-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "");
+    const name = job.mode === "brand_only" ?
+      (stem(job.filename.replace(/\.[^.]+$/, "")).slice(0, 85) || "video") + "_" +
+      (stem(job.channel_name).slice(0, 35) || "Branded") + ".mp4" : clip.file;
+    const handle = await window.showSaveFilePicker({
+      suggestedName: name,
+      types: [{description: "MP4 video", accept: {"video/mp4": [".mp4"]}}]
+    });
+    const output = await handle.createWritable();
+    const size = clip.technical.size_bytes;
+    const chunkSize = 16 * 1024 * 1024;
+    toast("Downloading MP4 · 0%");
+    try {
+      for (let start = 0; start < size; start += chunkSize) {
+        const end = Math.min(start + chunkSize, size);
+        const response = await api(url, {headers: {Range: "bytes=" + start + "-" + (end - 1)}});
+        const expectedRange = "bytes " + start + "-" + (end - 1) + "/" + size;
+        if (response.status !== 206 || response.headers.get("content-range") !== expectedRange) {
+          throw new Error("The export changed during download. Try again.");
+        }
+        const part = await response.arrayBuffer();
+        if (part.byteLength !== end - start) throw new Error("The download was interrupted. Try again.");
+        await output.write(part);
+        toast("Downloading MP4 · " + Math.floor(end * 100 / size) + "%");
+      }
+      await output.close();
+      toast("MP4 saved.");
+    } catch (error) {
+      await output.abort().catch(() => {});
+      throw error;
+    }
   }
 
   async function download(jobId, file) {
     try {
+      const job = jobs.find(item => item.id === jobId);
+      const clip = job?.clips?.find(item => item.file === file);
+      const url = outputUrl(jobId, file);
+      if (clip?.technical?.size_bytes > 128 * 1024 * 1024 && typeof window.showSaveFilePicker === "function") {
+        try {
+          await saveLargeVideo(job, clip, url);
+          return;
+        } catch (error) {
+          if (error.name === "AbortError") return;
+          if (error.name !== "SecurityError") throw error;
+        }
+      }
       toast("Preparing your download...");
-      const blob = await fileBlob(jobId, file);
-      const url = URL.createObjectURL(blob);
+      await api("/api/media-session", {method: "POST"});
       const anchor = document.createElement("a");
       anchor.href = url;
-      const job = jobs.find(j => j.id === jobId);
-      const safe = text => String(text || "").replace(/[^A-Za-z0-9_-]+/g,"_").replace(/^_+|_+$/g,"");
-      anchor.download = job?.mode === "brand_only" && file === "clip_01.mp4" ?
-        (safe(job.filename.replace(/\.[^.]+$/, "")).slice(0,85) || "video") + "_" +
-        (safe(job.channel_name).slice(0,35) || "Bajo_Mundo_TV") + ".mp4" : file;
+      anchor.download = "";
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 120000);
     } catch (error) { toast("Download error: " + error.message); }
   }
 
@@ -863,13 +957,15 @@
     data.append("clip_file", old);
     data.append("focus", $("reframeFocus").value);
     data.append("rights_confirmed", "true");
-    if (source) data.append("video", source, source.name);
     reframeSubmitting = true;
     $("reframeBtn").disabled = true;
     $("reframeStatus").textContent = "Submitting your focused edit…";
     try {
-      const response = await api("/api/jobs/" + encodeURIComponent(job.id) + "/reframe",
-                                 {method:"POST", body:data});
+      const submit = () => api("/api/jobs/" + encodeURIComponent(job.id) + "/reframe",
+                               {method:"POST", body:data});
+      const response = source ? await withVideoUpload(data, source, submit, percent => {
+        $("reframeStatus").textContent = "Uploading original video · " + percent + "%";
+      }) : await submit();
       const queued = await response.json();
       $("reframeSource").value = "";
       $("reframeStatus").textContent = "Creating " + queued.file + ".";
@@ -1161,8 +1257,11 @@
       button.disabled=true;
       cleanupInfo("Analyzing a few frames for persistent on-screen text. This may miss logos; all suggested removals require your approval.");
       try{
-        const data=new FormData();data.append("video",file,file.name);
-        const result=await (await api("/api/cleanup/suggest",{method:"POST",body:data})).json();
+        const data = new FormData();
+        const result = await (await withVideoUpload(data, file,
+          () => api("/api/cleanup/suggest", {method: "POST", body: data}),
+          percent => cleanupInfo(percent === 100 ? "Analyzing on-screen text…" : "Uploading · " + percent + "%")
+        )).json();
         const textMasks=(result.regions||[]).filter(allowedCleanupBox)
           .map(box=>({...box,kind:"text"}));
         const imageMasks=(result.review_candidates||[]).filter(allowedCleanupBox)
@@ -1211,12 +1310,15 @@
     const form = new FormData();
     form.append("source_rights_confirmed", "true");
     form.append("auto_cleanup", "true");
-    if (source) form.append("video", source, source.name);
     try {
-      const result = await (await api(
+      const submit = () => api(
         "/api/jobs/" + encodeURIComponent(job.id) + "/clean-rebrand",
         {method:"POST",body:form}
-      )).json();
+      );
+      const response = source ? await withVideoUpload(form, source, submit, percent => {
+        $("savedCleanState").textContent = "Uploading original video · " + percent + "%";
+      }) : await submit();
+      const result = await response.json();
       $("savedCleanSource").value = "";
       $("savedCleanState").textContent = "New project " + result.id + " queued.";
       await refreshJobs();
@@ -1270,9 +1372,19 @@
   function pickBrandBatchFiles(files) {
     if (brandBatchBusy) return;
     const all = Array.from(files || []);
-    brandBatchFiles = all.filter(file =>
-      /\.(mp4|mov|webm|mkv|m4v)$/i.test(file.name) && file.size > 0 &&
-      (!config || file.size <= config.max_upload_mb * 1048576));
+    const limit = config?.max_full_upload_mb ?? config?.max_upload_mb;
+    const rejected = [];
+    brandBatchFiles = all.filter(file => {
+      if (!/\.(mp4|mov|webm|mkv|m4v)$/i.test(file.name) || file.size === 0) {
+        rejected.push(file.name + " is empty or uses an unsupported format.");
+        return false;
+      }
+      if (limit && file.size > limit * 1048576) {
+        rejected.push(file.name + " exceeds the " + fullVideoLimitLabel() + " limit.");
+        return false;
+      }
+      return true;
+    });
     const count = brandBatchFiles.length;
     $("brandBatchFilesTitle").textContent = count ?
       count + (count === 1 ? " full video selected" : " full videos selected") :
@@ -1291,10 +1403,10 @@
       label.append(checkbox, file.name);
       textOptions.append(label);
     });
-    $("brandBatchStatus").textContent = count ?
-      "Ready for full-length video. Selected speech subtitles may take longer and need proofreading." :
-      "Choose valid video files under the per-video size limit.";
-    if (all.length > count) toast((all.length-count) + " unsupported or oversized file(s) skipped.");
+    $("brandBatchStatus").textContent = rejected.length ? rejected.slice(0, 2).join(" · ") : count ?
+      "Ready to upload. You can follow rendering under My exports." :
+      "Choose a video to start.";
+    if (rejected.length) toast(rejected[0]);
     updateBrandBatchButton();
     updateFullVideoPreview();
     previewCleanupSource();
@@ -1341,7 +1453,6 @@
       while (queue.length) {
         const {file, keepExistingText} = queue.shift();
         const form = new FormData();
-        form.append("video", file, file.name);
         form.append("brand_id", $("brandOnlyProfile").value);
         form.append("logo_position", $("brandOnlyPosition").value);
         form.append("logo_size", $("brandLogoSize").value);
@@ -1363,7 +1474,11 @@
         form.append("originality", $("brandOnlyOriginality").value);
         form.append("rights_acknowledged", "true");
         try {
-          await api("/api/brand-only", {method:"POST", body:form}); sent++;
+          await withVideoUpload(form, file, () => api("/api/brand-only", {method:"POST", body:form}),
+            percent => {
+              $("brandBatchStatus").textContent = "Uploading " + file.name + " · " + percent + "%";
+            });
+          sent++;
         } catch (error) { failures.push(file.name + ": " + error.message); }
         processed++;
         $("brandBatchStatus").textContent =
@@ -1568,6 +1683,7 @@
       if (!response.ok) throw new Error("Cannot connect to the processing server.");
       config = await response.json();
       $("uploadLimit").textContent = "MP4, MOV, WEBM, MKV, M4V · Up to " + config.max_upload_mb + " MB";
+      $("brandVideoLimit").textContent = "Up to " + fullVideoLimitLabel() + " per video. One-hour videos supported.";
       if (config.needs_setup) {
         $("authModal").classList.remove("hidden");
         $("authError").textContent = "Server setup required: set APP_PASSWORD in the host's environment variables.";

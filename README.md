@@ -5,6 +5,7 @@
 ## Features
 
 - Drag-and-drop video upload: MP4, MOV, MKV, WEBM, M4V
+- Brand full-length videos, including one-hour recordings up to 8 GB per file by default
 - Local speech transcription with Faster Whisper (no paid LLM API key)
 - Speech-aware highlight ranking and non-overlapping clip selection
 - Choose 1–10 clips, targeting 20, 30, 45 or 60 seconds
@@ -43,7 +44,7 @@ The first transcription may download a Whisper model. Processing runs locally, b
 2. Set **APP_PASSWORD** to a strong unique password before allowing visitors to upload files. The app rejects uploads on Railway when this value is missing.
 3. Attach a **persistent volume mounted at /data** for exports, job history, brand profiles, and the downloaded Whisper model.
 4. For CPU transcription and HD video encoding, allocate enough CPU/RAM; aim for **at least 2 GB RAM and 2 vCPU**, depending on the model and source resolution. Jobs can take minutes on smaller services.
-5. Set optional variables: MAX_UPLOAD_MB=750, WHISPER_MODEL=base (or tiny for lower memory), WHISPER_THREADS=2, WORKERS=1, JOB_TTL_HOURS=48, FFMPEG_CRF=22.
+5. Set optional variables such as MAX_UPLOAD_MB=750, MAX_FULL_UPLOAD_MB=8192, WHISPER_MODEL=base, WHISPER_THREADS=2, WORKERS=1, JOB_TTL_HOURS=48, and FFMPEG_CRF=22.
 6. Use Railway's generated HTTPS domain. /healthz reports the web app and FFmpeg presence.
 
 IMPORTANT: Railway and storage can incur hosting costs. No paid AI API is needed, but the hosting itself is not necessarily free.
@@ -55,7 +56,8 @@ IMPORTANT: Railway and storage can incur hosting costs. No paid AI API is needed
 - FFmpeg creates vertical videos, branding, subtitles and normalized audio.
 - Original video uploads stay in temporary space during processing. To reframe or rebrand a saved job, select the original from your device. Finished exports live under DATA_DIR (default ./data, production /data).
 - Choose **Already has subtitles or text** to keep on-screen wording and skip added captions. In full-video mode this also skips the follow banner and automatic text cleanup. A batch can use the setting for individual files.
-- Downloads require the access key and are delivered to the browser as authenticated blobs.
+- Full-length uploads use separate requests for each part. Railway can close an individual upload request after five minutes.
+- Opening the studio with the access key authorizes media playback and downloads. Playback and large MP4 downloads can use HTTP byte ranges.
 - Processing jobs are local; active jobs interrupted by an app restart cannot be resumed.
 - Files are processed from **direct uploads only**. The app has no URL downloader.
 
@@ -79,4 +81,4 @@ Tests cover clip selection fallback, title generation, highlight scoring, subtit
 - Full-frame layout preserves interview participants better than a center crop; neither currently performs automatic speaker/face tracking.
 - Word timing depends on the accuracy of the Whisper model. Poor audio, overlapping speakers and music can degrade subtitles.
 - No queue persistence across server restarts, GPU support, platform upload integration or automatic brand music licensing.
-- Large batch ZIP downloads load the archive into browser memory; use smaller batches on constrained computers.
+- Batch ZIPs are generated when requested and take temporary space on the server.

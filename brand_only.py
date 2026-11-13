@@ -2,16 +2,19 @@
 import json
 import os
 import subprocess
+import tempfile
+import time
 from pathlib import Path
 from overlay_cleanup import delogo_filters
 
 POSITIONS = ("top_right", "top_left", "bottom_right", "bottom_left")
+LONG_VIDEO_SECONDS = 15 * 60
 
 
 def probe_media(path):
     result = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries",
-         "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate",
+         "format=duration:stream=codec_type,codec_name,width,height,avg_frame_rate,duration,bit_rate",
          "-of", "json", str(path)],
         capture_output=True, text=True, check=True, timeout=35)
     data = json.loads(result.stdout)
@@ -26,12 +29,53 @@ def probe_media(path):
     return {"width": int(video["width"]), "height": int(video["height"]),
             "duration": duration, "video_codec": video.get("codec_name"),
             "audio_codec": audio.get("codec_name") if audio else None,
+            "audio_bitrate": int(audio["bit_rate"]) if audio and str(audio.get("bit_rate", "")).isdigit() else 0,
+            "video_duration": float(video["duration"]) if video.get("duration") not in (None, "N/A") else None,
             "has_audio": audio is not None, "frame_rate": video.get("avg_frame_rate")}
+
+
+def run_brand_encoder(command, duration, progress):
+    timeout = max(1800, duration * 5)
+    if progress is None:
+        subprocess.run(command, check=True, timeout=timeout, capture_output=True)
+        return
+
+    with tempfile.TemporaryDirectory(prefix="shorts-render-") as scratch, tempfile.TemporaryFile() as errors:
+        report = Path(scratch) / "progress"
+        args = [*command[:1], "-progress", str(report), "-stats_period", "3", *command[1:]]
+        with subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=errors) as encoder:
+            deadline = time.monotonic() + timeout
+            try:
+                while True:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError("The full-video render exceeded its processing time.")
+                    try:
+                        status = encoder.wait(timeout=min(6, remaining))
+                        break
+                    except subprocess.TimeoutExpired:
+                        if report.is_file():
+                            with report.open("rb") as state:
+                                state.seek(max(0, report.stat().st_size - 4096))
+                                for line in reversed(state.read().splitlines()):
+                                    if line.startswith(b"out_time_us="):
+                                        timestamp = line.split(b"=", 1)[1]
+                                        if timestamp.isdigit():
+                                            progress(min(1, int(timestamp) / (duration * 1_000_000)))
+                                            break
+            finally:
+                if encoder.poll() is None:
+                    encoder.kill()
+            if status:
+                errors.seek(max(0, errors.tell() - 2000))
+                message = errors.read().decode(errors="replace").strip()
+                raise RuntimeError(message or "FFmpeg could not render the full video.")
 
 
 def brand_full_video(source, destination, logo, *, position="top_right",
                      crop_top=0, crop_bottom=0, logo_size=30, logo_opacity=100,
-                     subtitle_file=None, follow_banner=None, cleanup_regions=None):
+                     subtitle_file=None, follow_banner=None, cleanup_regions=None,
+                     max_output_bytes=None, progress=None):
     """Preserve the source's complete timeline, audio and native frame geometry.
 
     Optional edge crops remove portions of the picture, not the duration.
@@ -102,22 +146,35 @@ def brand_full_video(source, destination, logo, *, position="top_right",
     command = [
         "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
         *inputs,
-        "-filter_complex", vf, "-map", "[outv]", "-map", "0:a:0?",
+        "-filter_complex_threads", "2", "-filter_complex", vf, "-map", "[outv]", "-map", "0:a:0?",
         "-sn", "-dn", "-map_metadata", "-1", "-map_chapters", "-1",
         "-c:v", "libx264", "-preset", os.getenv("BRAND_FFMPEG_PRESET", "veryfast"),
         "-crf", os.getenv("BRAND_FFMPEG_CRF", "20"),
         "-pix_fmt", "yuv420p", "-threads", "2",
         "-c:a", "copy" if before["audio_codec"] == "aac" else "aac",
-        "-movflags", "+faststart", str(destination)
     ]
+    if max_output_bytes is not None:
+        audio_budget = max(before["audio_bitrate"], 256_000) if before["has_audio"] else 0
+        video_budget = int((max_output_bytes * 7.6 / before["duration"] - audio_budget) / 1000)
+        if video_budget < 500:
+            raise ValueError("Download and remove finished exports to free space for a new MP4.")
+        command += ["-maxrate", f"{video_budget}k", "-bufsize", f"{video_budget * 2}k",
+                    "-fs", str(max_output_bytes)]
+    command += ["-movflags", "+faststart", str(destination)]
     try:
-        subprocess.run(command, check=True, timeout=1800, capture_output=True)
+        run_brand_encoder(command, before["duration"], progress)
         after = probe_media(destination)
         if after["video_codec"] != "h264" or not destination.is_file() or destination.stat().st_size < 2048:
             raise ValueError("Export codec or media file verification failed")
         if before["has_audio"] and not after["has_audio"]:
             raise ValueError("Audio was unexpectedly lost in the export")
-        if abs(after["duration"] - before["duration"]) > max(0.5, before["duration"] * 0.02):
+        original_video_duration = before["video_duration"]
+        video_duration_mismatch = (original_video_duration is not None and
+                                   after["video_duration"] is not None and
+                                   abs(after["video_duration"] - original_video_duration) > 2)
+        if abs(after["duration"] - before["duration"]) > 2 or video_duration_mismatch:
+            if max_output_bytes and destination.stat().st_size >= max_output_bytes * .98:
+                raise ValueError("The full video needs more export space. Download and remove finished exports, then try again.")
             raise ValueError("Output duration did not preserve the source")
         return {
             "verified": True, "width": after["width"], "height": after["height"],
