@@ -377,8 +377,20 @@ PY
 test -s "$DIR/brand-full.mp4"
 
 # Videos with existing subtitles should keep their text and skip new overlays.
+source_size="$(wc -c < "$DIR/source.mp4" | tr -d ' ')"
+upload="$(curl -fsS -H "X-Access-Key: $TOKEN" \
+  -F "filename=captioned.mp4" -F "size=$source_size" "$URL/api/video-uploads")"
+upload_id="$(python -c 'import json,sys; print(json.load(sys.stdin)["upload_id"])' <<< "$upload")"
+upload_url="$URL/api/video-uploads/$upload_id?offset=0"
+for _ in 1 2; do
+  curl -fsS -H "X-Access-Key: $TOKEN" -H 'Content-Type: application/octet-stream' \
+    -X PUT --data-binary @"$DIR/source.mp4" \
+    "$upload_url" > "$DIR/upload-progress.json"
+  python -c 'import json,sys; assert json.load(open(sys.argv[1]))["offset"] == int(sys.argv[2])' \
+    "$DIR/upload-progress.json" "$source_size"
+done
 curl -fsS -H "X-Access-Key: $TOKEN" \
-  -F "video=@$DIR/source.mp4" -F "rights_acknowledged=true" \
+  -F "upload_id=$upload_id" -F "rights_acknowledged=true" \
   -F "subtitle_mode=auto" -F "follow_banner=true" -F "auto_cleanup=true" \
   -F "keep_existing_text=true" "$URL/api/brand-only" > "$DIR/existing-text-submit.json"
 existing_text_id="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$DIR/existing-text-submit.json")"
@@ -401,6 +413,18 @@ assert not technical["follow_banner"]
 assert not technical["auto_cleanup_requested"]
 assert technical["cleanup_region_count"] == 0
 PY
+docker exec "$NAME" sh -c '
+  for workspace in /tmp/shorts-factory-inputs-*; do
+    test ! -e "$workspace/$1.mp4" || exit 1
+  done
+' sh "$upload_id"
+curl -fsS -c "$DIR/media.cookies" -H "X-Access-Key: $TOKEN" \
+  -X POST "$URL/api/media-session" -o /dev/null
+range_status="$(curl -sS -b "$DIR/media.cookies" -H 'Range: bytes=0-511' \
+  -o "$DIR/export-prefix.mp4" -w '%{http_code}' \
+  "$URL/api/jobs/$existing_text_id/files/clip_01.mp4?inline=true")"
+test "$range_status" = "206"
+test "$(wc -c < "$DIR/export-prefix.mp4")" -eq 512
 
 # OCR suggestions require authentication and never modify the source.
 curl -fsS --max-time 90 -H "X-Access-Key: $TOKEN" \
