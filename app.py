@@ -1,6 +1,8 @@
 import asyncio
+import errno
 import hmac
 import json
+import logging
 import os
 import zipfile
 from copy import deepcopy
@@ -12,6 +14,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
@@ -30,6 +33,8 @@ from pipeline import transcribe
 
 BASE = Path(os.getenv("DATA_DIR", "./data")).resolve()
 BASE.mkdir(parents=True, exist_ok=True)
+UPLOAD_WORKSPACE = tempfile.TemporaryDirectory(prefix="shorts-factory-inputs-")
+UPLOAD_DIR = Path(UPLOAD_WORKSPACE.name)
 STATIC = Path(__file__).resolve().parent / "static"
 MAX_UPLOAD = int(os.getenv("MAX_UPLOAD_MB", "750")) * 1024 * 1024
 PASSWORD = os.getenv("APP_PASSWORD", "")
@@ -39,7 +44,18 @@ LOCK = threading.RLock()
 THUMB_LOCK = threading.Lock()
 ALLOWED_VIDEOS = {".mp4", ".mov", ".mkv", ".webm", ".m4v"}
 ALLOWED_LOGOS = {".png", ".webp", ".jpg", ".jpeg"}
-app = FastAPI(title="Shorts Factory", docs_url=None, redoc_url=None, openapi_url=None)
+ACTIVE_JOB_STATUSES = ("queued", "analyzing", "rendering")
+LOGGER = logging.getLogger("uvicorn.error")
+
+
+@asynccontextmanager
+async def lifespan(_app):
+    await asyncio.to_thread(cleanup_stored_sources)
+    yield
+
+
+app = FastAPI(title="Shorts Factory", docs_url=None, redoc_url=None, openapi_url=None,
+              lifespan=lifespan)
 
 
 def protect(x_access_key: str | None):
@@ -83,7 +99,12 @@ def update_job(job_id: str, **fields):
 
 
 def public_job(job: dict) -> dict:
-    return {key: value for key, value in job.items() if key not in ("source", "logo")}
+    public = {key: value for key, value in job.items() if key not in ("source", "logo")}
+    source = job.get("source")
+    public["source_available"] = bool(
+        job.get("status") == "completed" and source and Path(source).is_file()
+    )
+    return public
 
 
 def iter_job_folders(newest_first: bool = False) -> list[Path]:
@@ -124,7 +145,8 @@ def cleanup_old_jobs():
     for folder in iter_job_folders():
         try:
             job = json.loads((folder / "job.json").read_text(encoding="utf-8"))
-            if job.get("status") in ("queued", "analyzing", "rendering"):
+            if (job.get("status") in ACTIVE_JOB_STATUSES or
+                    job.get("reframe", {}).get("status") in ACTIVE_JOB_STATUSES):
                 continue
             if time.time() - folder.stat().st_mtime > age_limit:
                 shutil.rmtree(folder)
@@ -132,27 +154,71 @@ def cleanup_old_jobs():
             continue
 
 
-def process(job_id: str):
+def remove_source(path: Path) -> bool:
     try:
-        job = read_job(job_id)
+        path.unlink()
+        return True
+    except FileNotFoundError:
+        return False
+    except OSError:
+        LOGGER.warning("Could not remove a Shorts Factory source upload", exc_info=True)
+        return False
+
+
+def cleanup_stored_sources():
+    """Release original uploads written to the volume by previous versions."""
+    removed = 0
+    for folder in iter_job_folders():
+        try:
+            job = read_job(folder.name)
+        except HTTPException:
+            continue
+        updates = {}
+        source = Path(job.get("source") or "")
+        if source.suffix in ALLOWED_VIDEOS and source == folder / ("source" + source.suffix):
+            if remove_source(source):
+                removed += 1
+                updates["source"] = None
+        # Processing runs in this process. Jobs left active by a previous
+        # container can no longer make progress.
+        if job.get("status") in ACTIVE_JOB_STATUSES:
+            updates.update(status="interrupted", note="Processing interrupted by a restart. Upload again.")
+        reframe = job.get("reframe", {})
+        if reframe.get("status") in ACTIVE_JOB_STATUSES:
+            updates["reframe"] = {**reframe, "status": "failed",
+                                  "error": "Processing interrupted by a restart. Try again."}
+        if updates:
+            try:
+                update_job(folder.name, **updates)
+            except OSError:
+                LOGGER.warning("Could not update an interrupted Shorts Factory job", exc_info=True)
+    if removed:
+        LOGGER.info("Removed %d previously stored original uploads", removed)
+
+
+def process(job_id: str):
+    job = read_job(job_id)
+    source = Path(job["source"])
+    try:
         def progress(percent: int, status: str, note: str):
             update_job(job_id, progress=max(0, min(100, int(percent))), status=status, note=note)
         result = make_shorts(job, job_dir(job_id), progress)
-        update_job(job_id, progress=100, status="completed",
+        remove_source(source)
+        update_job(job_id, source=None, progress=100, status="completed",
                    note="Your shorts are ready.", clips=result["clips"],
                    warnings=result["warnings"], transcript=result["transcript"],
                    zip_file=result["zip_file"], review=result["review"])
-        # Preserve the clips but avoid storing their ZIP duplicate permanently.
-        # Download requests regenerate the archive outside the persistent volume.
-        (job_dir(job_id) / "outputs" / result["zip_file"]).unlink(missing_ok=True)
     except Exception as exc:
-        update_job(job_id, status="failed", note=str(exc)[:500], progress=0)
+        remove_source(source)
+        shutil.rmtree(job_dir(job_id) / "outputs", ignore_errors=True)
+        update_job(job_id, source=None, status="failed", note=str(exc)[:500], progress=0)
 
 
 def process_brand_only(job_id: str):
     """Video-only render: bypass transcription and highlight selection."""
+    job = read_job(job_id)
+    source = Path(job["source"])
     try:
-        job = read_job(job_id)
         update_job(job_id, status="rendering", progress=8,
                    note="Branding full video; keeping all original seconds and audio...")
         folder = job_dir(job_id)
@@ -287,8 +353,9 @@ def process_brand_only(job_id: str):
                 "level": "review", "title": "Proofread auto captions before posting",
                 "detail": "Speech recognition can mishear Dominican slang, names and music. Watch the whole video and correct mistakes before distribution."
             })
-        update_job(job_id, status="completed", progress=100,
-                   note="Full-length branded video ready. Originals preserved.",
+        remove_source(source)
+        update_job(job_id, source=None, status="completed", progress=100,
+                   note="Full-length branded video ready.",
                    clips=[clip], review=review, zip_file=None,
                    cleanup_status=technical["source_cleanliness"],
                    transcript=" ".join(w["text"] for w in words)[:60000],
@@ -297,7 +364,9 @@ def process_brand_only(job_id: str):
                        "Filming, adding subtitles, or applying a logo does not establish music rights or Facebook monetization eligibility."
                    ])
     except Exception as exc:
-        update_job(job_id, status="failed", progress=0,
+        remove_source(source)
+        shutil.rmtree(job_dir(job_id) / "outputs", ignore_errors=True)
+        update_job(job_id, source=None, status="failed", progress=0,
                    note="Unable to brand the video: " + str(exc)[:350])
 
 
@@ -312,6 +381,7 @@ async def submit_brand_only(
     subtitle_mode: str = Form("none"),
     subtitle_style: str = Form("show"),
     follow_banner: bool = Form(False),
+    keep_existing_text: bool = Form(False),
     performance_permission: str = Form("unknown"),
     release_reference: str = Form(""),
     cleanup_regions: str = Form("[]"),
@@ -340,6 +410,9 @@ async def submit_brand_only(
         masks = normalize_masks(cleanup_regions)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    if keep_existing_text:
+        subtitle_mode = "none"
+        follow_banner = auto_cleanup = False
     if (masks or auto_cleanup) and not cleanup_authorized:
         raise HTTPException(400, "Confirm your permission before automatic or manual graphic removal.")
     if not (15 <= logo_size <= 40 and 60 <= logo_opacity <= 100):
@@ -351,27 +424,24 @@ async def submit_brand_only(
         raise HTTPException(400, "Unsupported footage rights selection.")
     if audio_rights not in AUDIO_RIGHTS or originality not in ORIGINALITY:
         raise HTTPException(400, "Unsupported audio rights or originality selection.")
-    suffix = Path(video.filename or "").suffix.lower()
-    if suffix not in ALLOWED_VIDEOS:
-        raise HTTPException(400, "Please upload MP4, MOV, MKV, WEBM or M4V.")
     try:
         logo_path = brand_path(brand_id)
     except (ValueError, OSError, RuntimeError) as exc:
         raise HTTPException(400, "Selected logo profile is unavailable.") from exc
     if logo_path is None:
         raise HTTPException(400, "Select a channel profile that has a logo.")
-    # Reserve storage conservatively for uncompressed source and rendered MP4.
+    # Check persistent space for the export. Uploaded originals live in /tmp.
     if shutil.disk_usage(BASE).free < 250 * 1024 * 1024:
-        raise HTTPException(507, "Server storage is low. Download and archive exports first.")
+        raise HTTPException(507, "Server storage is low. Download and delete exports you no longer need.")
     job_id = uuid.uuid4().hex[:20]
     folder = job_dir(job_id)
     folder.mkdir(mode=0o700, parents=True)
+    source = None
     try:
-        source = folder / ("source" + suffix)
-        await save_upload(video, source, MAX_UPLOAD)
+        source = await save_video_upload(video)
         needed_space = max(180 * 1024 * 1024, source.stat().st_size * 2)
         if shutil.disk_usage(BASE).free < needed_space:
-            raise HTTPException(507, "Not enough server space to safely render this video. Archive previous exports first.")
+            raise HTTPException(507, "Not enough space to render this video. Download and delete exports you no longer need.")
         logo_snapshot = folder / "brand.png" if not logo_already_embedded else None
         if logo_snapshot:
             shutil.copyfile(logo_path, logo_snapshot)
@@ -392,6 +462,7 @@ async def submit_brand_only(
             "logo_already_embedded": logo_already_embedded,
             "subtitle_mode": subtitle_mode, "subtitle_style": subtitle_style,
             "follow_banner": follow_banner,
+            "keep_existing_text": keep_existing_text,
             "performance_permission": performance_permission,
             "release_reference": release_reference.strip(),
             "cleanup_regions": masks,
@@ -406,15 +477,18 @@ async def submit_brand_only(
         cleanup_old_jobs()
         EXECUTOR.submit(process_brand_only, job_id)
         return public_job(record)
-    except Exception:
+    except (Exception, asyncio.CancelledError):
+        if source is not None:
+            remove_source(source)
         shutil.rmtree(folder, ignore_errors=True)
         raise
 
 
 
 @app.post("/api/jobs/{job_id}/clean-rebrand", status_code=202)
-def clean_rebrand_saved_source(
+async def clean_rebrand_saved_source(
     job_id: str,
+    video: UploadFile | None = File(None),
     source_rights_confirmed: bool = Form(False),
     auto_cleanup: bool = Form(True),
     x_access_key: str | None = Header(default=None),
@@ -430,24 +504,13 @@ def clean_rebrand_saved_source(
     original = read_job(job_id)
     if original.get("status") != "completed":
         raise HTTPException(409, "The source project is not completed.")
-    src = Path(original.get("source") or "")
-    if not src.is_file() or src.is_symlink():
-        raise HTTPException(409, "Saved original video unavailable. Re-upload the source.")
-    if src.suffix.lower() not in ALLOWED_VIDEOS:
-        raise HTTPException(400, "Unsupported original video format.")
-    if shutil.disk_usage(BASE).free < max(180*1024*1024, src.stat().st_size):
-        raise HTTPException(507, "Insufficient space to render the new copy.")
     fresh_id = uuid.uuid4().hex[:20]
     folder = job_dir(fresh_id)
-    folder.mkdir(parents=True, mode=0o700)
+    source = await source_for_edit(original, video)
     try:
-        dst = folder / ("source" + src.suffix.lower())
-        # Reuse the original inode when the filesystem supports hard links.
-        # This does not duplicate video bytes or alter either project.
-        try:
-            os.link(src, dst)
-        except OSError:
-            shutil.copyfile(src, dst)
+        if shutil.disk_usage(BASE).free < max(180 * 1024 * 1024, source.stat().st_size):
+            raise HTTPException(507, "Insufficient space to render the new copy.")
+        folder.mkdir(parents=True, mode=0o700)
         logo = folder / "brand.png"
         shutil.copyfile(brand_path("bajo-mundo"), logo)
         now = int(time.time())
@@ -457,7 +520,7 @@ def clean_rebrand_saved_source(
             "status": "queued", "progress": 1,
             "note": "Analyzing old graphics before creating separate Bajo Mundo version",
             "mode": "brand_only", "source_job_id": job_id,
-            "source": str(dst), "logo": str(logo),
+            "source": str(source), "logo": str(logo),
             "logo_position": "top_right", "logo_size": 24,
             "logo_opacity": 100, "logo_already_embedded": False,
             "brand_id": "bajo-mundo", "channel_name": "Bajo Mundo TV",
@@ -478,6 +541,7 @@ def clean_rebrand_saved_source(
         EXECUTOR.submit(process_brand_only, fresh_id)
         return public_job(record)
     except Exception:
+        remove_source(source)
         shutil.rmtree(folder, ignore_errors=True)
         raise
 
@@ -537,14 +601,14 @@ async def suggest_old_graphic_areas(
     suffix = Path(video.filename or "").suffix.lower()
     if suffix not in ALLOWED_VIDEOS:
         raise HTTPException(400, "Choose MP4, MOV, MKV, WEBM or M4V.")
-    with tempfile.TemporaryDirectory(dir=str(BASE)) as td:
-        source = Path(td) / ("sample" + suffix)
-        await save_upload(video, source, MAX_UPLOAD)
-        try:
-            info = probe_media(source)
-            return suggest_text_masks(source, info["duration"])
-        except (OSError, ValueError, subprocess.SubprocessError) as exc:
-            raise HTTPException(422, "Analysis unavailable; mark unwanted graphics manually.") from exc
+    source = await save_video_upload(video)
+    try:
+        info = await asyncio.to_thread(probe_media, source)
+        return await asyncio.to_thread(suggest_text_masks, source, info["duration"])
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        raise HTTPException(422, "Analysis unavailable; mark unwanted graphics manually.") from exc
+    finally:
+        remove_source(source)
 
 
 @app.get("/healthz")
@@ -605,13 +669,8 @@ def list_jobs(x_access_key: str | None = Header(default=None)):
     jobs = []
     for folder in iter_job_folders(newest_first=True):
         try:
-            job = json.loads((folder / "job.json").read_text(encoding="utf-8"))
-            if job.get("status") in ("queued", "analyzing", "rendering") and job.get("updated_at", 0) < time.time() - 7200:
-                job["status"] = "interrupted"
-                job["note"] = "Processing interrupted by a restart. Upload again."
-                save_job(job)
-            jobs.append(public_job(job))
-        except (OSError, ValueError):
+            jobs.append(public_job(read_job(folder.name)))
+        except HTTPException:
             pass
         if len(jobs) >= 100:
             break
@@ -633,7 +692,7 @@ async def save_upload(upload: UploadFile, path: Path, limit: int):
                 if total > limit:
                     raise HTTPException(413, "File is larger than the allowed upload size.")
                 output.write(chunk)
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         path.unlink(missing_ok=True)
         raise
     finally:
@@ -641,6 +700,39 @@ async def save_upload(upload: UploadFile, path: Path, limit: int):
     if total == 0:
         path.unlink(missing_ok=True)
         raise HTTPException(400, "The uploaded file was empty.")
+
+
+async def save_video_upload(video: UploadFile) -> Path:
+    suffix = Path(video.filename or "").suffix.lower()
+    if suffix not in ALLOWED_VIDEOS:
+        raise HTTPException(400, "Please upload MP4, MOV, MKV, WEBM or M4V.")
+    if video.size is not None and video.size > MAX_UPLOAD:
+        raise HTTPException(413, "File is larger than the allowed upload size.")
+    if video.size is not None and shutil.disk_usage(UPLOAD_DIR).free < video.size:
+        raise HTTPException(507, "Temporary upload space is full. Try again after processing finishes.")
+    source = UPLOAD_DIR / (uuid.uuid4().hex + suffix)
+    try:
+        await save_upload(video, source, MAX_UPLOAD)
+    except OSError as exc:
+        if exc.errno in (errno.ENOSPC, errno.EDQUOT):
+            raise HTTPException(507, "Temporary upload space is full. Try again after processing finishes.") from exc
+        raise
+    return source
+
+
+async def source_for_edit(job: dict, video: UploadFile | None) -> Path:
+    if video is not None:
+        return await save_video_upload(video)
+    original = Path(job.get("source") or "")
+    if original.suffix not in ALLOWED_VIDEOS or not original.is_file() or original.is_symlink():
+        raise HTTPException(409, "Select the original video from your device and try again.")
+    source = UPLOAD_DIR / (uuid.uuid4().hex + original.suffix)
+    try:
+        await asyncio.to_thread(shutil.copyfile, original, source)
+    except (OSError, asyncio.CancelledError):
+        remove_source(source)
+        raise
+    return source
 
 
 @app.post("/api/jobs", status_code=202)
@@ -651,6 +743,7 @@ async def create_job(
     clip_length: int = Form(default=45),
     layout: str = Form(default="fill"),
     captions: str = Form(default="pop"),
+    keep_existing_text: bool = Form(False),
     brand_name: str = Form(default=""),
     brand_id: str = Form(default="bajo-mundo"),
     cover_old_brand: str = Form(default="none"),
@@ -688,9 +781,6 @@ async def create_job(
         raise HTTPException(400, "Channel brand unavailable. Choose another logo.") from exc
     selected_channel = next((brand["name"] for brand in list_brands()
                              if brand["id"] == brand_id), "Custom channel")
-    suffix = Path(video.filename or "").suffix.lower()
-    if suffix not in ALLOWED_VIDEOS:
-        raise HTTPException(400, "Please upload an MP4, MOV, MKV, WEBM or M4V video.")
     logo_suffix = Path(logo.filename or "").suffix.lower() if logo and logo.filename else ""
     if logo_suffix and logo_suffix not in ALLOWED_LOGOS:
         raise HTTPException(400, "The logo must be PNG, WEBP, JPG, or JPEG.")
@@ -698,9 +788,9 @@ async def create_job(
     job_id = uuid.uuid4().hex[:20]
     directory = job_dir(job_id)
     directory.mkdir(parents=True)
+    source_path = None
     try:
-        source_path = directory / ("source" + suffix)
-        await save_upload(video, source_path, MAX_UPLOAD)
+        source_path = await save_video_upload(video)
         logo_path = selected_logo
         if logo and logo_suffix:
             logo_path = directory / ("brand" + logo_suffix)
@@ -710,7 +800,9 @@ async def create_job(
             "id": job_id, "filename": clip_name, "created_at": now, "updated_at": now,
             "status": "queued", "progress": 2, "note": "Waiting for video processor...",
             "clip_count": clip_count, "clip_length": clip_length, "layout": layout,
-            "captions": captions, "brand_name": brand_name.strip()[:55],
+            "captions": "none" if keep_existing_text else captions,
+            "brand_name": "" if keep_existing_text else brand_name.strip()[:55],
+            "keep_existing_text": keep_existing_text,
             "rights": rights, "source": str(source_path),
             "logo": str(logo_path) if logo_path else None,
             "brand_id": brand_id if not (logo and logo_suffix) else "custom-upload",
@@ -725,13 +817,15 @@ async def create_job(
         cleanup_old_jobs()
         EXECUTOR.submit(process, job_id)
         return public_job(job)
-    except Exception:
+    except (Exception, asyncio.CancelledError):
+        if source_path is not None:
+            remove_source(source_path)
         shutil.rmtree(directory, ignore_errors=True)
         raise
 
 
 
-def _reframe_worker(job_id: str, source_filename: str, focus: str, output_name: str):
+def _reframe_worker(job_id: str, source: Path, source_filename: str, focus: str, output_name: str):
     """Non-destructive edit of an existing saved clip from its original footage."""
     folder = job_dir(job_id)
     out_dir = folder / "outputs"
@@ -742,10 +836,9 @@ def _reframe_worker(job_id: str, source_filename: str, focus: str, output_name: 
                                     "focus": focus, "source_clip": source_filename})
         job = read_job(job_id)
         original = next(c for c in job["clips"] if c["file"] == source_filename)
-        source = Path(job["source"])
-        if not source.is_file():
-            raise RuntimeError("Original uploaded video is no longer available")
         duration, has_audio = probe_video(source)
+        if duration + .05 < float(original["end"]):
+            raise RuntimeError("Select the original upload; this video ends before the selected clip.")
         captions_name = "captions_" + source_filename[5:7] + ".ass"
         captions_path = folder / captions_name
         subtitle = captions_path if original.get("captions") and captions_path.is_file() else None
@@ -794,9 +887,9 @@ def _reframe_worker(job_id: str, source_filename: str, focus: str, output_name: 
                            "reframe": {"status": "ready", "file": output_name, "focus": focus,
                                        "source_clip": source_filename},
                            "updated_at": int(time.time())})
-            save_job(latest)
             # ZIP can be regenerated from the saved clips on demand.
             (out_dir / zip_name).unlink(missing_ok=True)
+            save_job(latest)
     except Exception as exc:
         temporary.unlink(missing_ok=True)
         destination.unlink(missing_ok=True)
@@ -809,11 +902,14 @@ def _reframe_worker(job_id: str, source_filename: str, focus: str, output_name: 
                 })
             except HTTPException:
                 pass
+    finally:
+        remove_source(source)
 
 
 @app.post("/api/jobs/{job_id}/reframe", status_code=202)
-def reframe_saved_clip(
+async def reframe_saved_clip(
     job_id: str,
+    video: UploadFile | None = File(None),
     clip_file: str = Form(...),
     focus: str = Form(...),
     rights_confirmed: bool = Form(False),
@@ -826,32 +922,40 @@ def reframe_saved_clip(
         raise HTTPException(400, "Choose left, right or full-frame focus.")
     if not re.fullmatch(r"clip_[0-9]{2}\.mp4", clip_file):
         raise HTTPException(400, "Reframe one original clip at a time.")
-    with LOCK:
-        job = read_job(job_id)
-        if job.get("status") != "completed":
-            raise HTTPException(409, "Clip is not ready")
-        if not any(c.get("file") == clip_file for c in job.get("clips", [])):
-            raise HTTPException(404, "Original clip not found")
-        if job.get("reframe", {}).get("status") in ("queued", "rendering"):
-            raise HTTPException(409, "A focused version is already processing.")
-        if len(job.get("clips", [])) >= 20:
-            raise HTTPException(409, "Maximum of 20 versions in this project.")
-        if not Path(job.get("source", "")).is_file():
-            raise HTTPException(409, "The original source is unavailable; upload again.")
-        # One immutable filename per operation; existing results are never overwritten.
-        version = 1
-        while True:
-            candidate = f"{clip_file[:-4]}_focus_{focus}_{version:02}.mp4"
-            if not (job_dir(job_id) / "outputs" / candidate).exists():
-                break
-            version += 1
-            if version > 99:
+    job = read_job(job_id)
+    if job.get("status") != "completed":
+        raise HTTPException(409, "Clip is not ready")
+    source = await source_for_edit(job, video)
+    try:
+        with LOCK:
+            job = read_job(job_id)
+            if job.get("status") != "completed":
+                raise HTTPException(409, "Clip is not ready")
+            if not any(c.get("file") == clip_file for c in job.get("clips", [])):
+                raise HTTPException(404, "Original clip not found")
+            if job.get("reframe", {}).get("status") in ("queued", "rendering"):
+                raise HTTPException(409, "A focused version is already processing.")
+            if len(job.get("clips", [])) >= 20:
+                raise HTTPException(409, "Maximum of 20 versions in this project.")
+            # Pick a new filename while the job is locked.
+            for version in range(1, 100):
+                candidate = f"{clip_file[:-4]}_focus_{focus}_{version:02}.mp4"
+                if not (job_dir(job_id) / "outputs" / candidate).exists():
+                    break
+            else:
                 raise HTTPException(409, "Too many focused versions.")
-        update_job(job_id, reframe={
-            "status": "queued", "file": candidate,
-            "source_clip": clip_file, "focus": focus
-        })
-    EXECUTOR.submit(_reframe_worker, job_id, clip_file, focus, candidate)
+            update_job(job_id, reframe={
+                "status": "queued", "file": candidate,
+                "source_clip": clip_file, "focus": focus
+            })
+            try:
+                EXECUTOR.submit(_reframe_worker, job_id, source, clip_file, focus, candidate)
+            except RuntimeError:
+                update_job(job_id, reframe={"status": "failed", "error": "Try again after the server restarts."})
+                raise HTTPException(503, "The video processor is restarting. Try again shortly.")
+    except Exception:
+        remove_source(source)
+        raise
     return {"status": "queued", "file": candidate,
             "detail": "A new focused copy is being rendered; original clip is unchanged."}
 
@@ -947,10 +1051,11 @@ def get_thumbnail(job_id: str, clip_filename: str, x_access_key: str | None = He
 @app.delete("/api/jobs/{job_id}")
 def delete_job(job_id: str, x_access_key: str | None = Header(default=None)):
     protect(x_access_key)
-    job = read_job(job_id)
-    if job["status"] in ("queued", "analyzing", "rendering") or job.get("reframe", {}).get("status") in ("queued", "rendering"):
-        raise HTTPException(409, "Cannot delete an active processing job")
-    shutil.rmtree(job_dir(job_id))
+    with LOCK:
+        job = read_job(job_id)
+        if job["status"] in ACTIVE_JOB_STATUSES or job.get("reframe", {}).get("status") in ACTIVE_JOB_STATUSES:
+            raise HTTPException(409, "Cannot delete an active processing job")
+        shutil.rmtree(job_dir(job_id))
     return {"deleted": True}
 
 

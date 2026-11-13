@@ -387,6 +387,11 @@ body.has-results .studio-hero{display:none}
 .brand-drop-icon{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;background:#c8fb60;color:#151e0b;font-size:21px;font-weight:900;margin-bottom:4px}
 .brand-file-drop strong{font-size:17px;color:#f2faf3}
 .brand-file-drop p{font-size:11px;color:#a6b7c3;line-height:1.55;margin:0;max-width:95%;overflow-wrap:anywhere}
+.brand-existing-text{margin:14px 0 0;padding:12px 15px;border:1px solid #415566;border-radius:11px;min-width:0;background:#17232e}
+.brand-existing-text legend{padding:0 5px;color:#e8f7ed;font-size:12px;font-weight:750}
+.brand-existing-text p{margin:0 0 8px;color:#abc0c7;font-size:11px;line-height:1.5}
+.brand-existing-text label{display:flex;align-items:flex-start;gap:8px;padding:5px 0;overflow-wrap:anywhere}
+.brand-existing-text input{flex-shrink:0;accent-color:var(--lime)}
 .brand-quick-pick{font-size:12px;font-weight:850;color:#d7ffb1;border:1px solid #5c7e46;background:#263423;padding:11px 15px;border-radius:9px;margin-top:5px;cursor:pointer}
 .brand-quick-controls{display:flex;flex-direction:column;gap:8px;background:#111b24;border:1px solid #2f4550;border-radius:14px;padding:18px}
 .brand-quick-controls>label{font-size:11px;font-weight:750;color:#c4d5d6}

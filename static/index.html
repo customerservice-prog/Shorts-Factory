@@ -7,7 +7,7 @@
   <title>Shorts Factory — AI Clip Studio</title>
   <meta name="description" content="Turn long videos into captioned, branded, vertical Shorts with a private editing studio.">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css?v=14">
+  <link rel="stylesheet" href="/style.css?v=15">
 </head>
 <body>
   <div class="app-shell">
@@ -97,17 +97,19 @@
               <div class="saved-smart-clean" id="savedSmartClean">
                 <div>
                   <strong>Fix old branding in this saved video</strong>
-                  <p>Reprocess the saved original with a Bajo Mundo TV logo and automatic old-text scan. Static logos, reaction windows and heavy graphics can still require manual work.</p>
+                  <p>Scan the original for old graphics and apply the Bajo Mundo TV logo.</p>
                 </div>
+                <label id="savedCleanSourceRow">Original video <input type="file" id="savedCleanSource" accept=".mp4,.mov,.webm,.mkv,.m4v,video/*"></label>
                 <label><input type="checkbox" id="savedCleanPermission"> I have permission to edit and rebrand this footage.</label>
                 <button type="button" id="savedCleanBtn">✦ Scan &amp; create new clean copy</button>
-                <p id="savedCleanState" role="status">Your original export will remain unchanged.</p>
+                <p id="savedCleanState" role="status"></p>
               </div>
               <div class="reframe-tool" id="reframeTool" aria-label="Fix clip framing">
                 <div class="reframe-heading">
-                  <div><strong>Fix the split-screen look</strong><small>Create a fresh crop from the saved original. Your existing export stays unchanged.</small></div>
+                  <div><strong>Fix the split-screen look</strong><small>Create a fresh crop from the original video.</small></div>
                   <span>RE-EDIT</span>
                 </div>
+                <label class="reframe-confirm" id="reframeSourceRow">Original video <input type="file" id="reframeSource" accept=".mp4,.mov,.webm,.mkv,.m4v,video/*"></label>
                 <div class="reframe-actions">
                   <label for="reframeFocus">Frame focus</label>
                   <select id="reframeFocus" aria-label="Choose framing for new clip">
@@ -150,12 +152,19 @@
             <p>Select one video or a batch of videos. Shorts Factory keeps your entire footage and original audio, applies the original Bajo Mundo TV logo, and can add Spanish speech subtitles and a short follow banner. No highlight cuts.</p>
           </div>
           <div class="brand-quick-grid">
-            <div class="brand-file-drop" id="brandBatchDrop" role="button" tabindex="0" aria-label="Choose one or more entire videos">
-              <input id="brandBatchFiles" type="file" accept=".mp4,.mov,.webm,.mkv,.m4v,video/*" multiple hidden>
-              <div class="brand-drop-icon">▶</div>
-              <strong id="brandBatchFilesTitle">Choose videos to brand</strong>
-              <p id="brandBatchFilesDetail">One video or a whole batch · MP4, MOV, MKV, WEBM, M4V</p>
-              <button type="button" id="brandBatchBrowse" class="brand-quick-pick">＋ Select video files</button>
+            <div>
+              <div class="brand-file-drop" id="brandBatchDrop" role="button" tabindex="0" aria-label="Choose one or more entire videos">
+                <input id="brandBatchFiles" type="file" accept=".mp4,.mov,.webm,.mkv,.m4v,video/*" multiple hidden>
+                <div class="brand-drop-icon">▶</div>
+                <strong id="brandBatchFilesTitle">Choose videos to brand</strong>
+                <p id="brandBatchFilesDetail">One video or a whole batch · MP4, MOV, MKV, WEBM, M4V</p>
+                <button type="button" id="brandBatchBrowse" class="brand-quick-pick">＋ Select video files</button>
+              </div>
+              <fieldset id="brandExistingTextFiles" class="brand-existing-text hidden">
+                <legend>Already has subtitles or text</legend>
+                <p>Check the videos that should skip new captions, the follow banner, and automatic text cleanup.</p>
+                <div id="brandExistingTextOptions"></div>
+              </fieldset>
             </div>
             <div class="brand-quick-controls">
               <label for="brandOnlyProfile">Apply this channel logo</label>
@@ -228,10 +237,11 @@
               <div class="brand-show-style">
                 <strong>Show-style video presentation</strong>
                 <small>Original footage stays full-length. Added subtitles are automatically timed and must be proofread.</small>
-                <label for="brandSubtitleMode">Spanish speech subtitles</label>
+                <label for="brandSubtitleMode">On-screen text</label>
                 <select id="brandSubtitleMode">
                   <option value="auto" selected>Automatic speech captions · review accuracy</option>
                   <option value="none">No added subtitles</option>
+                  <option value="existing">Already has subtitles or text</option>
                 </select>
                 <label for="brandSubtitleStyle">Subtitle appearance</label>
                 <select id="brandSubtitleStyle">
@@ -264,7 +274,7 @@
           <label class="brand-rights-ack"><input id="brandRightsAcknowledged" type="checkbox"> I understand that changing branding does not grant copyright permission or Facebook monetization approval.</label>
           <div class="brand-quick-footer">
             <button id="brandBatchSubmit" type="button" disabled>Brand full videos <span>↗</span></button>
-            <div id="brandBatchStatus" role="status">Your original uploads are saved separately. Each output is a full-length MP4.</div>
+            <div id="brandBatchStatus" role="status">Uploads are temporary. Get your finished MP4s under My exports.</div>
           </div>
         </section>
 
@@ -309,7 +319,7 @@
             <div class="section-top"><div><span class="section-number step-circle">3</span><div><h2>Make it yours</h2><p class="section-description">Customize your finished clips</p></div></div><span class="soft-tag purple">AUTO EDIT</span></div>
             <div class="setting"><div class="setting-title"><label for="clipCount">How many clips?</label><strong id="clipCountText">5 clips</strong></div><input id="clipCount" type="range" min="1" max="10" value="5"><div class="slider-labels"><span>1 clip</span><span>10 clips</span></div></div>
             <div class="setting"><label for="clipLength">Target clip duration</label><div class="select-wrap"><select id="clipLength"><option value="20">20 seconds — quick</option><option value="30">30 seconds — punchy</option><option value="45" selected>45 seconds — balanced</option><option value="60">60 seconds — story</option><option value="90">90 seconds — TikTok Rewards target</option></select></div></div>
-            <div class="setting"><label for="captions">Caption animation</label><div class="select-wrap"><select id="captions"><option value="pop" selected>Pop — animated word highlights</option><option value="classic">Classic — clean subtitles</option><option value="none">No captions</option></select></div></div>
+            <div class="setting"><label for="captions">On-screen text</label><div class="select-wrap"><select id="captions"><option value="pop" selected>Pop — animated word highlights</option><option value="classic">Classic — clean subtitles</option><option value="none">No added captions</option><option value="existing">Already has subtitles or text</option></select></div></div>
             <div class="setting"><label>Video framing</label><div class="choice-row" id="layoutGroup"><button type="button" class="choice active" data-layout="fill"><span class="layout-icon">▯</span><strong>Fill screen</strong><small>Center cropped</small></button><button type="button" class="choice" data-layout="blur"><span class="layout-icon">▣</span><strong>Full scene</strong><small>Soft background</small></button><button type="button" class="choice" data-layout="left"><span class="layout-icon">◧</span><strong>Focus left</strong><small>For split video</small></button><button type="button" class="choice" data-layout="right"><span class="layout-icon">◨</span><strong>Focus right</strong><small>For split video</small></button></div><p class="framing-help">Split-screen source? Pick left or right to choose a focus area. Preview the finished export before posting.</p></div>
             <div class="option-heading branding-header"><span class="brand-label-icon">✦</span><h2>Your branding</h2><span class="subtle-optional">Optional</span></div>
             <div class="channel-branding">
@@ -356,6 +366,6 @@
   </div>
   <div class="modal-backdrop hidden" id="authModal"><form class="auth-modal" id="authForm"><div class="auth-icon">▶</div><h2>Welcome to your studio</h2><p>Enter the private password configured for your Shorts Factory server.</p><label for="accessPassword">Access password</label><input type="password" id="accessPassword" autocomplete="current-password" placeholder="Your studio password" required><button type="submit" class="generate-button">Unlock studio <span>↗</span></button><span class="auth-error" id="authError"></span></form></div>
   <div class="toast hidden" id="toast" role="status"></div>
-  <script src="/app.js?v=14" defer></script>
+  <script src="/app.js?v=15" defer></script>
 </body>
 </html>

@@ -99,6 +99,7 @@ folder.rmdir()
 # Generate an entirely synthetic test clip; no copyrighted source material.
 docker exec "$NAME" ffmpeg -hide_banner -loglevel error -y \
   -f lavfi -i "testsrc2=size=320x180:rate=12:duration=4" \
+  -vf "drawtext=text=Original captions:fontcolor=white:fontsize=20:x=95:y=145" \
   -c:v libx264 -pix_fmt yuv420p /tmp/smoke-source.mp4
 docker cp "$NAME:/tmp/smoke-source.mp4" "$DIR/source.mp4"
 
@@ -137,6 +138,8 @@ PY
   sleep 3
 done
 test "$finished" = "1"
+docker exec "$NAME" sh -c 'test -f "/data/$1/job.json" && test ! -e "/data/$1/source.mp4"' sh "$id"
+python -c 'import json,sys; assert json.load(open(sys.argv[1]))["source_available"] is False' "$DIR/status.json"
 
 curl -fsS --max-time 40 -H "X-Access-Key: $TOKEN" \
   "$URL/api/jobs/$id/files/clip_01.mp4" -o "$DIR/clip_01.mp4"
@@ -172,8 +175,12 @@ code="$(curl -sS -H "X-Access-Key: $TOKEN" -o /dev/null -w '%{http_code}' \
   -F "clip_file=clip_01.mp4" -F "focus=right" -F "rights_confirmed=false" \
   "$URL/api/jobs/$id/reframe")"
 test "$code" = "400"
-curl -fsS -H "X-Access-Key: $TOKEN" \
+code="$(curl -sS -H "X-Access-Key: $TOKEN" -o /dev/null -w '%{http_code}' \
   -F "clip_file=clip_01.mp4" -F "focus=left" -F "rights_confirmed=true" \
+  "$URL/api/jobs/$id/reframe")"
+test "$code" = "409"
+curl -fsS -H "X-Access-Key: $TOKEN" \
+  -F "clip_file=clip_01.mp4" -F "focus=left" -F "rights_confirmed=true" -F "video=@$DIR/source.mp4" \
   "$URL/api/jobs/$id/reframe" > "$DIR/reframe.json"
 python - "$DIR/reframe.json" <<'PY'
 import json,sys
@@ -264,6 +271,7 @@ brand_id="$(python - "$DIR/brand-submit.json" <<'PY'
 import json,sys
 job=json.load(open(sys.argv[1]))
 assert job["mode"] == "brand_only"
+assert job["source_available"] is False
 assert job["brand_id"] == "bajo-mundo"
 assert job["logo_size"] == 33
 assert job["logo_opacity"] == 90
@@ -329,7 +337,7 @@ code="$(curl -sS -o /dev/null -w '%{http_code}' -H "X-Access-Key: $TOKEN" \
  -F "source_rights_confirmed=false" "$URL/api/jobs/$brand_id/clean-rebrand")"
 test "$code" = "400"
 curl -fsS -H "X-Access-Key: $TOKEN" \
- -F "source_rights_confirmed=true" -F "auto_cleanup=true" \
+ -F "source_rights_confirmed=true" -F "auto_cleanup=true" -F "video=@$DIR/source.mp4" \
  "$URL/api/jobs/$brand_id/clean-rebrand" > "$DIR/rebrand-submit.json"
 rebrand_id="$(python - "$DIR/rebrand-submit.json" <<'PY'
 import json,sys
@@ -367,6 +375,32 @@ assert j["clips"][0]["technical"]["auto_cleanup_requested"] is True
 assert j["clips"][0]["technical"]["full_length"]
 PY
 test -s "$DIR/brand-full.mp4"
+
+# Videos with existing subtitles should keep their text and skip new overlays.
+curl -fsS -H "X-Access-Key: $TOKEN" \
+  -F "video=@$DIR/source.mp4" -F "rights_acknowledged=true" \
+  -F "subtitle_mode=auto" -F "follow_banner=true" -F "auto_cleanup=true" \
+  -F "keep_existing_text=true" "$URL/api/brand-only" > "$DIR/existing-text-submit.json"
+existing_text_id="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["id"])' "$DIR/existing-text-submit.json")"
+for _ in $(seq 1 45); do
+  curl -fsS -H "X-Access-Key: $TOKEN" \
+    "$URL/api/jobs/$existing_text_id" > "$DIR/existing-text.json"
+  state="$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$DIR/existing-text.json")"
+  if [[ "$state" == "completed" || "$state" == "failed" ]]; then break; fi
+  sleep 2
+done
+python - "$DIR/existing-text.json" <<'PY'
+import json, sys
+job = json.load(open(sys.argv[1]))
+assert job["status"] == "completed", job
+assert not job["source_available"]
+technical = job["clips"][0]["technical"]
+assert technical["logo_added"]
+assert not technical["captions_added"]
+assert not technical["follow_banner"]
+assert not technical["auto_cleanup_requested"]
+assert technical["cleanup_region_count"] == 0
+PY
 
 # OCR suggestions require authentication and never modify the source.
 curl -fsS --max-time 90 -H "X-Access-Key: $TOKEN" \
