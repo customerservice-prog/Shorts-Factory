@@ -41,7 +41,7 @@ The first transcription may download a Whisper model. Processing runs locally, b
 
 1. Create a Railway project, add a service from this GitHub repository (branch main). Railway uses Dockerfile via railway.json.
 2. Set **APP_PASSWORD** to a strong unique password before allowing visitors to upload files. The app rejects uploads on Railway when this value is missing.
-3. Attach a **persistent volume mounted at /data**. Without it, videos, exports, and Whisper model downloads are lost on deployment/restart.
+3. Attach a **persistent volume mounted at /data** for exports, job history, brand profiles, and the downloaded Whisper model.
 4. For CPU transcription and HD video encoding, allocate enough CPU/RAM; aim for **at least 2 GB RAM and 2 vCPU**, depending on the model and source resolution. Jobs can take minutes on smaller services.
 5. Set optional variables: MAX_UPLOAD_MB=750, WHISPER_MODEL=base (or tiny for lower memory), WHISPER_THREADS=2, WORKERS=1, JOB_TTL_HOURS=48, FFMPEG_CRF=22.
 6. Use Railway's generated HTTPS domain. /healthz reports the web app and FFmpeg presence.
@@ -53,7 +53,8 @@ IMPORTANT: Railway and storage can incur hosting costs. No paid AI API is needed
 - FastAPI backend serves the SPA, manages uploads/jobs, and requires X-Access-Key when APP_PASSWORD is configured.
 - A single in-process worker runs Faster Whisper for speech transcription and scores sentence-bounded candidate windows using word density, strong openings, thematic words, punctuation and overlap reduction.
 - FFmpeg creates vertical videos, branding, subtitles and normalized audio.
-- Files live under DATA_DIR (default ./data, production /data) and may be removed after 48 hours once finished.
+- Original video uploads stay in temporary space during processing. To reframe or rebrand a saved job, select the original from your device. Finished exports live under DATA_DIR (default ./data, production /data).
+- Choose **Already has subtitles or text** to keep on-screen wording and skip added captions. In full-video mode this also skips the follow banner and automatic text cleanup. A batch can use the setting for individual files.
 - Downloads require the access key and are delivered to the browser as authenticated blobs.
 - Processing jobs are local; active jobs interrupted by an app restart cannot be resumed.
 - Files are processed from **direct uploads only**. The app has no URL downloader.

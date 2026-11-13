@@ -32,6 +32,7 @@
   let pendingCompletionId = null;
   let lastDisplayedClipFile = null;
   let lastReframeSeen = null;
+  let reframeSubmitting = false;
   // New uploads are the default workspace; saved exports open only on request.
   let showingNewProject = true;
   const thumbs = new Map();
@@ -416,12 +417,15 @@
         if (!recipe) return;
         $("clipCount").value = String(recipe.count);
         $("clipLength").value = recipe.length;
-        $("captions").value = recipe.captions;
+        if ($("captions").value !== "existing") $("captions").value = recipe.captions;
         updateSummary();
       });
     });
     $("clipLength").addEventListener("change", updateSummary);
-    $("captions").addEventListener("change", updateSummary);
+    $("captions").addEventListener("change", () => {
+      $("brandName").disabled = $("captions").value === "existing";
+      updateSummary();
+    });
     for (const eventName of ["dragenter", "dragover"]) {
       $("dropzone").addEventListener(eventName, (e) => {
         e.preventDefault(); e.stopPropagation(); $("dropzone").classList.add("dragging");
@@ -492,7 +496,9 @@
     form.append("clip_count", $("clipCount").value);
     form.append("clip_length", $("clipLength").value);
     form.append("layout", layout);
-    form.append("captions", $("captions").value);
+    const keepExistingText = $("captions").value === "existing";
+    form.append("captions", keepExistingText ? "none" : $("captions").value);
+    form.append("keep_existing_text", String(keepExistingText));
     form.append("brand_name", $("brandName").value);
     form.append("rights", $("rights").value);
     const button = $("generateBtn");
@@ -619,10 +625,12 @@
       return;
     }
     showingNewProject = false;
-    const fingerprint = job.id + "/" + (job.clips || []).map(c => c.file).join("|");
+    const fingerprint = job.id + "/" + job.source_available + "/" +
+      (job.clips || []).map(c => c.file).join("|");
     const previousFile = selectedJobId === job.id ? lastDisplayedClipFile : null;
     selectedJobId = job.id;
     if (renderedResultsKey === fingerprint && !$("results").classList.contains("hidden")) return;
+    const changedJob = !renderedResultsKey.startsWith(job.id + "/");
     renderedResultsKey = fingerprint;
     $("results").classList.remove("hidden");
     document.body.classList.add("has-results");
@@ -633,6 +641,13 @@
     $("galleryTitle").textContent = fullVideo ? "Full-length export" : "All clips";
     $("reframeTool").classList.toggle("hidden", fullVideo);
     $("savedSmartClean").classList.remove("hidden");
+    $("reframeSourceRow").classList.toggle("hidden", job.source_available === true);
+    $("savedCleanSourceRow").classList.toggle("hidden", job.source_available === true);
+    if (changedJob) {
+      $("reframeSource").value = "";
+      $("savedCleanSource").value = "";
+      $("savedCleanState").textContent = "";
+    }
     $("downloadAll").textContent = fullVideo ? "↓ Download full MP4" : "↓ Download all ZIP";
     $("resultsCount").textContent = (job.clips || []).length + (fullVideo ? " video" : " clips");
     $("stageQueueCount").textContent = (job.clips || []).length + (fullVideo ? " video" : " clips");
@@ -820,13 +835,13 @@
   function updateReframeStatus(job) {
     const status = $("reframeStatus");
     const button = $("reframeBtn");
-    if (!status || !button) return;
+    if (reframeSubmitting) return;
     const task = job?.reframe;
     const busy = task?.status === "queued" || task?.status === "rendering";
     button.disabled = busy;
     button.textContent = busy ? "Creating new clip…" : "Create cleaner version";
     status.textContent = busy ?
-      "Generating " + task.focus + " focus from your saved original. You can leave this page; the new clip will appear here." :
+      "Generating " + task.focus + " focus from your original video. The new clip will appear here." :
       task?.status === "failed" ? (task.error || "Could not create the reframed clip.") :
       task?.status === "ready" ? "Latest version saved: " + task.file +
         ". Your old clip was not changed. Check the new composition before publishing." :
@@ -834,29 +849,38 @@
   }
 
   async function createFocusedVersion() {
+    if (reframeSubmitting) return;
     const job = jobs.find(j => j.id === selectedJobId);
     const clip = job?.clips?.[selectedClipIndex];
     if (!job || !clip) return toast("Select an existing clip first.");
     if (!$("reframePermission").checked) return toast("Please confirm you have permission to re-edit the source footage.");
     if (!["left", "right", "fill"].includes($("reframeFocus").value)) return;
+    const source = $("reframeSource").files[0];
+    if (!job.source_available && !source)
+      return toast("Choose the original video from your device.");
     const old = clip.source_clip || clip.file;
     const data = new FormData();
     data.append("clip_file", old);
     data.append("focus", $("reframeFocus").value);
     data.append("rights_confirmed", "true");
+    if (source) data.append("video", source, source.name);
+    reframeSubmitting = true;
     $("reframeBtn").disabled = true;
     $("reframeStatus").textContent = "Submitting your focused edit…";
     try {
       const response = await api("/api/jobs/" + encodeURIComponent(job.id) + "/reframe",
                                  {method:"POST", body:data});
       const queued = await response.json();
-      $("reframeStatus").textContent = "Creating " + queued.file + ". Your original clip is safe.";
+      $("reframeSource").value = "";
+      $("reframeStatus").textContent = "Creating " + queued.file + ".";
       toast("Reframing started. Watch for your new Short in the playlist.");
       await refreshJobs();
     } catch (error) {
       $("reframeStatus").textContent = error.message;
       toast("Reframe error: " + error.message);
       $("reframeBtn").disabled = false;
+    } finally {
+      reframeSubmitting = false;
     }
   }
 
@@ -870,8 +894,10 @@
     const alpha = Number($("brandLogoOpacity").value);
     $("brandLogoSizeValue").textContent = percent + "%";
     $("brandLogoOpacityValue").textContent = alpha + "%";
-    $("showBannerDemo").hidden = !$("brandFollowBanner").checked;
-    $("showCaptionDemo").hidden = $("brandSubtitleMode").value === "none";
+    const keepExistingText = $("brandSubtitleMode").value === "existing" ||
+      !!$("brandExistingTextOptions").querySelector('input[value="0"]:checked');
+    $("showBannerDemo").hidden = keepExistingText || !$("brandFollowBanner").checked;
+    $("showCaptionDemo").hidden = keepExistingText || $("brandSubtitleMode").value === "none";
     $("showCaptionDemo").classList.toggle("clean", $("brandSubtitleStyle").value === "clean");
     $("watermarkPreviewMessage").textContent = skipped ?
       "No extra watermark will be burned in. Your existing on-video logo stays." :
@@ -1176,19 +1202,23 @@
       return toast("Open a saved completed video first.");
     if (!$("savedCleanPermission").checked)
       return toast("Confirm you have permission to rebrand this source footage.");
+    const source = $("savedCleanSource").files[0];
+    if (!job.source_available && !source)
+      return toast("Choose the original video from your device.");
     const button = $("savedCleanBtn");
     button.disabled = true;
     $("savedCleanState").textContent = "Creating a separate project; scanning old graphics from the original upload…";
     const form = new FormData();
     form.append("source_rights_confirmed", "true");
     form.append("auto_cleanup", "true");
+    if (source) form.append("video", source, source.name);
     try {
       const result = await (await api(
         "/api/jobs/" + encodeURIComponent(job.id) + "/clean-rebrand",
         {method:"POST",body:form}
       )).json();
-      $("savedCleanState").textContent =
-        "New project " + result.id + " queued. Original video and previous export are preserved. Inspect the new result before posting.";
+      $("savedCleanSource").value = "";
+      $("savedCleanState").textContent = "New project " + result.id + " queued.";
       await refreshJobs();
       showPage("library", false);
       $("pageLibrary").scrollIntoView({behavior:"smooth",block:"start"});
@@ -1251,18 +1281,38 @@
       brandBatchFiles.slice(0,3).map(file => file.name).join(" · ") +
         (count > 3 ? " · and " + (count - 3) + " more" : "") :
       "One video or a whole batch · MP4, MOV, MKV, WEBM, M4V";
+    const textOptions = $("brandExistingTextOptions");
+    textOptions.replaceChildren();
+    brandBatchFiles.forEach((file, index) => {
+      const label = document.createElement("label");
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.value = String(index);
+      label.append(checkbox, file.name);
+      textOptions.append(label);
+    });
     $("brandBatchStatus").textContent = count ?
       "Ready for full-length video. Selected speech subtitles may take longer and need proofreading." :
       "Choose valid video files under the per-video size limit.";
     if (all.length > count) toast((all.length-count) + " unsupported or oversized file(s) skipped.");
     updateBrandBatchButton();
+    updateFullVideoPreview();
     previewCleanupSource();
   }
   function updateBrandBatchButton() {
     const b = $("brandBatchSubmit");
+    const textMode = $("brandSubtitleMode").value;
+    const textOptions = [...$("brandExistingTextOptions").querySelectorAll("input")];
+    const keepsText = textMode === "existing";
+    $("brandExistingTextFiles").classList.toggle("hidden", !textOptions.length || keepsText);
+    $("brandExistingTextFiles").disabled = brandBatchBusy;
+    $("brandSubtitleStyle").disabled = textMode !== "auto";
+    $("brandFollowBanner").disabled = keepsText;
+    const needsAutoCleanup = !keepsText && textOptions.some(option => !option.checked) &&
+      $("autoCleanup").checked;
     b.disabled = brandBatchBusy || !brandBatchFiles.length ||
       !$("brandRightsAcknowledged").checked ||
-      ($("autoCleanup").checked && !$("cleanupAuthorized").checked);
+      (needsAutoCleanup && !$("cleanupAuthorized").checked);
     b.textContent = brandBatchBusy ? "Uploading batch…" :
       "Brand " + (brandBatchFiles.length || "full") +
       (brandBatchFiles.length === 1 ? " video ↗" : " full videos ↗");
@@ -1273,28 +1323,39 @@
     const top = Number($("brandCropTop").value), bottom = Number($("brandCropBottom").value);
     if (![top,bottom].every(n => Number.isInteger(n) && n >= 0 && n <= 25) || top + bottom > 40)
       return toast("Crop 0–25% per edge, maximum 40% combined.");
-    if((cleanupRegions.length || $("autoCleanup").checked) && !$("cleanupAuthorized").checked)
+    const textMode = $("brandSubtitleMode").value;
+    const autoCleanup = $("autoCleanup").checked;
+    const existingTextFiles = new Set(Array.from(
+      $("brandExistingTextOptions").querySelectorAll("input:checked"), option => Number(option.value)
+    ));
+    const queue = brandBatchFiles.map((file, index) => ({
+      file, keepExistingText: textMode === "existing" || existingTextFiles.has(index)
+    }));
+    if ((cleanupRegions.length || (autoCleanup && queue.some(item => !item.keepExistingText))) &&
+        !$("cleanupAuthorized").checked)
       return toast("Confirm permission to remove old on-screen graphics before continuing.");
     brandBatchBusy = true; updateBrandBatchButton();
-    const queue = brandBatchFiles.slice(), total = queue.length, failures = [];
+    const total = queue.length, failures = [];
     let sent = 0, processed = 0;
     async function worker() {
       while (queue.length) {
-        const file = queue.shift(), form = new FormData();
+        const {file, keepExistingText} = queue.shift();
+        const form = new FormData();
         form.append("video", file, file.name);
         form.append("brand_id", $("brandOnlyProfile").value);
         form.append("logo_position", $("brandOnlyPosition").value);
         form.append("logo_size", $("brandLogoSize").value);
         form.append("logo_opacity", $("brandLogoOpacity").value);
         form.append("logo_already_embedded", $("brandLogoAlreadyEmbedded").checked ? "true" : "false");
-        form.append("subtitle_mode", $("brandSubtitleMode").value);
+        form.append("subtitle_mode", keepExistingText ? "none" : textMode);
         form.append("subtitle_style", $("brandSubtitleStyle").value);
-        form.append("follow_banner", $("brandFollowBanner").checked ? "true" : "false");
+        form.append("follow_banner", String(!keepExistingText && $("brandFollowBanner").checked));
+        form.append("keep_existing_text", String(keepExistingText));
         form.append("performance_permission", $("brandPerformancePermission").value);
         form.append("release_reference", $("brandReleaseReference").value);
         form.append("cleanup_regions", JSON.stringify(cleanupRegions));
         form.append("cleanup_authorized", $("cleanupAuthorized").checked ? "true":"false");
-        form.append("auto_cleanup", $("autoCleanup").checked ? "true" : "false");
+        form.append("auto_cleanup", String(!keepExistingText && autoCleanup));
         form.append("crop_top", String(top));
         form.append("crop_bottom", String(bottom));
         form.append("rights", $("brandOnlyRights").value);
@@ -1359,6 +1420,11 @@
       }
     });
     $("brandBatchFiles").addEventListener("change", e => pickBrandBatchFiles(e.target.files));
+    $("brandSubtitleMode").addEventListener("change", updateBrandBatchButton);
+    $("brandExistingTextOptions").addEventListener("change", () => {
+      updateBrandBatchButton();
+      updateFullVideoPreview();
+    });
     $("brandRightsAcknowledged").addEventListener("change", updateBrandBatchButton);
     for (const ev of ["dragenter","dragover"]) {
       $("brandBatchDrop").addEventListener(ev, e => {
