@@ -17,6 +17,7 @@ from pathlib import Path
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.background import BackgroundTask
 
 from pipeline import make_shorts, generate_thumbnail, probe_video, render_clip
 from branding import BRAND_DIR, PROFILE_ID, brand_path, list_brands, save_brand
@@ -141,6 +142,9 @@ def process(job_id: str):
                    note="Your shorts are ready.", clips=result["clips"],
                    warnings=result["warnings"], transcript=result["transcript"],
                    zip_file=result["zip_file"], review=result["review"])
+        # Preserve the clips but avoid storing their ZIP duplicate permanently.
+        # Download requests regenerate the archive outside the persistent volume.
+        (job_dir(job_id) / "outputs" / result["zip_file"]).unlink(missing_ok=True)
     except Exception as exc:
         update_job(job_id, status="failed", note=str(exc)[:500], progress=0)
 
@@ -442,7 +446,13 @@ def clean_rebrand_saved_source(
         try:
             os.link(src, dst)
         except OSError:
-            shutil.copyfile(src, dst)
+            # The project and source live on the same persistent volume.
+            # A hard link preserves both project paths without doubling disk use.
+            try:
+                os.link(src, dst)
+            except OSError:
+                # Different filesystems or disallowed links: preserve old behavior.
+                shutil.copyfile(src, dst)
         logo = folder / "brand.png"
         shutil.copyfile(brand_path("bajo-mundo"), logo)
         now = int(time.time())
@@ -608,7 +618,7 @@ def list_jobs(x_access_key: str | None = Header(default=None)):
             jobs.append(public_job(job))
         except (OSError, ValueError):
             pass
-        if len(jobs) >= 20:
+        if len(jobs) >= 100:
             break
     return {"jobs": jobs}
 
@@ -799,6 +809,8 @@ def _reframe_worker(job_id: str, source_filename: str, focus: str, output_name: 
                                        "source_clip": source_filename},
                            "updated_at": int(time.time())})
             save_job(latest)
+            # ZIP can be regenerated from the saved clips on demand.
+            (out_dir / zip_name).unlink(missing_ok=True)
     except Exception as exc:
         temporary.unlink(missing_ok=True)
         destination.unlink(missing_ok=True)
@@ -858,6 +870,39 @@ def reframe_saved_clip(
             "detail": "A new focused copy is being rendered; original clip is unchanged."}
 
 
+def archive_on_demand(job: dict, output_dir: Path, filename: str):
+    """Build a downloadable ZIP outside /data, without permanently duplicating MP4s."""
+    fd, temporary = tempfile.mkstemp(prefix="shorts-download-", suffix=".zip")
+    os.close(fd)
+    path = Path(temporary)
+    try:
+        with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as bundle:
+            for clip in job.get("clips", []):
+                name = clip.get("file", "")
+                if not re.fullmatch(r"clip_[0-9]{2}(?:_focus_(?:left|right|fill)_[0-9]{2})?\\.mp4", name):
+                    raise HTTPException(409, "An export has an invalid filename.")
+                video = output_dir / name
+                if not video.is_file() or video.is_symlink():
+                    raise HTTPException(409, "An exported clip is missing. Archive unavailable.")
+                bundle.write(video, arcname=name)
+            bundle.writestr("clips.json", json.dumps({
+                "source": job.get("filename"),
+                "rights_selected": job.get("rights"),
+                "channel": job.get("channel_name"),
+                "brand_id": job.get("brand_id"),
+                "previous_brand_cover": job.get("cover_old_brand", "none"),
+                "clips": job.get("clips", []),
+                "warnings": job.get("warnings", []),
+                "review": job.get("review"),
+                "note": "Export does not establish copyright clearance or monetization eligibility.",
+            }, ensure_ascii=False, indent=2))
+        return FileResponse(path, filename=filename, media_type="application/zip",
+                            background=BackgroundTask(lambda: path.unlink(missing_ok=True)))
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+
+
 @app.get("/api/jobs/{job_id}/files/{filename}")
 def get_output(job_id: str, filename: str, x_access_key: str | None = Header(default=None)):
     protect(x_access_key)
@@ -868,6 +913,8 @@ def get_output(job_id: str, filename: str, x_access_key: str | None = Header(def
     if filename not in allowed or not filename:
         raise HTTPException(404, "File not found")
     file_path = job_dir(job_id) / "outputs" / filename
+    if filename.endswith(".zip") and not file_path.is_file():
+        return archive_on_demand(job, file_path.parent, filename)
     if not file_path.is_file():
         raise HTTPException(404, "File not found")
     download_name = filename
