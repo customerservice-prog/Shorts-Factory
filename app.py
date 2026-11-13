@@ -792,18 +792,9 @@ def _reframe_worker(job_id: str, source_filename: str, focus: str, output_name: 
             new_clips = latest["clips"] + [variant]
             review = latest["review"]
             review.setdefault("clip_reviews", []).append(report)
-            # Rebuild the ZIP without modifying any original MP4.
+            # Keep only the MP4s. The archive is built outside /data
+            # when the user actually requests a ZIP download.
             zip_name = latest.get("zip_file") or "shorts_factory_export.zip"
-            zip_pending = out_dir / "_pending_export.zip"
-            with zipfile.ZipFile(zip_pending, "w", zipfile.ZIP_STORED) as archive:
-                for clip in new_clips:
-                    archive.write(out_dir / clip["file"], arcname=clip["file"])
-                archive.writestr("clips.json", json.dumps({
-                    "source": latest.get("filename"),
-                    "clips": new_clips, "review": review,
-                    "note": "Exports require human rights and monetization review."
-                }, ensure_ascii=False, indent=2))
-            zip_pending.replace(out_dir / zip_name)
             latest.update({"clips": new_clips, "review": review, "zip_file": zip_name,
                            "reframe": {"status": "ready", "file": output_name, "focus": focus,
                                        "source_clip": source_filename},
