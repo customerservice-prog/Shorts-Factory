@@ -879,7 +879,7 @@ def archive_on_demand(job: dict, output_dir: Path, filename: str):
         with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as bundle:
             for clip in job.get("clips", []):
                 name = clip.get("file", "")
-                if not re.fullmatch(r"clip_[0-9]{2}(?:_focus_(?:left|right|fill)_[0-9]{2})?\\.mp4", name):
+                if not re.fullmatch(r"clip_[0-9]{2}(?:_focus_(?:left|right|fill)_[0-9]{2})?\.mp4", name):
                     raise HTTPException(409, "An export has an invalid filename.")
                 video = output_dir / name
                 if not video.is_file() or video.is_symlink():
